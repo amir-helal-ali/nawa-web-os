@@ -1,0 +1,25 @@
+[package]
+name = "nawa-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA-DB — built-in hybrid KV/Document database"
+
+[dependencies]
+nawa-kernel = { path = "../nawa-kernel" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+crossbeam.workspace = true
+arc-swap.workspace = true
+xxhash-rust.workspace = true
+memmap2.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"
+criterion = "0.5"

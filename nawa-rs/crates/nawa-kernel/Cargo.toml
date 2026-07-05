@@ -1,0 +1,19 @@
+[package]
+name = "nawa-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA zero-copy kernel — io_uring + mmap abstractions"
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+crossbeam.workspace = true
+arc-swap.workspace = true
+memmap2.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"

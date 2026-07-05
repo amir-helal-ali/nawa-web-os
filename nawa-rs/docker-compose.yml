@@ -1,0 +1,23 @@
+# docker-compose.yml — single-command deploy on any VPS
+services:
+  nawa:
+    build: .
+    container_name: nawa-prod
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - nawa-data:/var/lib/nawa
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M      # works on the smallest VPS
+        reservations:
+          memory: 64M
+    environment:
+      RUST_LOG: "info,nawa=debug"
+      NAWA_WORKERS: "4"
+
+volumes:
+  nawa-data:

@@ -1,0 +1,24 @@
+[package]
+name = "nawad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA daemon binary — HTTP server + DB + kernel"
+
+[[bin]]
+name = "nawad"
+path = "src/main.rs"
+
+[dependencies]
+nawa-kernel = { path = "../nawa-kernel" }
+nawa-db = { path = "../nawa-db" }
+nawa-http = { path = "../nawa-http" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+chrono.workspace = true
