@@ -11,6 +11,7 @@ import { CodePlayground } from "@/components/nawa/CodePlayground";
 import { PerformanceDashboard } from "@/components/nawa/PerformanceDashboard";
 import { StackComparison } from "@/components/nawa/StackComparison";
 import { CostCalculator } from "@/components/nawa/CostCalculator";
+import { UseCases } from "@/components/nawa/UseCases";
 import { SecurityLayer } from "@/components/nawa/SecurityLayer";
 import { Observability } from "@/components/nawa/Observability";
 import { PluginMarketplace } from "@/components/nawa/PluginMarketplace";
@@ -19,6 +20,8 @@ import { MigrationGuide } from "@/components/nawa/MigrationGuide";
 import { AppBuilder } from "@/components/nawa/AppBuilder";
 import { CLISimulator } from "@/components/nawa/CLISimulator";
 import { Testimonials } from "@/components/nawa/Testimonials";
+import { Timeline } from "@/components/nawa/Timeline";
+import { Changelog } from "@/components/nawa/Changelog";
 import { Ecosystem } from "@/components/nawa/Ecosystem";
 import { DockerDeployment } from "@/components/nawa/DockerDeployment";
 import { Roadmap } from "@/components/nawa/Roadmap";
@@ -42,6 +45,7 @@ export default function Home() {
       <PerformanceDashboard />
       <StackComparison />
       <CostCalculator />
+      <UseCases />
       <SecurityLayer />
       <Observability />
       <PluginMarketplace />
@@ -50,6 +54,8 @@ export default function Home() {
       <AppBuilder />
       <CLISimulator />
       <Testimonials />
+      <Timeline />
+      <Changelog />
       <Ecosystem />
       <DockerDeployment />
       <Roadmap />
