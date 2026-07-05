@@ -261,7 +261,7 @@ export function Observability() {
                       span.color === "primary" ? "bg-primary/60" : "bg-accent/60"
                     }`}
                     style={{
-                      left: `${(span.level * 8) + Math.random() * 10}%`,
+                      left: `${(span.level * 8) + (span.id * 7) % 10}%`,
                       width: `${Math.max((span.duration / 1.42) * 80, 4)}%`,
                     }}
                   />
