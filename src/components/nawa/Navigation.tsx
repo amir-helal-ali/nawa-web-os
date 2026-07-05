@@ -7,12 +7,17 @@ import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
   { id: "concept", label: "الفكرة", en: "Concept" },
+  { id: "flow", label: "رحلة الطلب", en: "Flow" },
   { id: "architecture", label: "المعمارية", en: "Architecture" },
   { id: "kernel", label: "النواة", en: "Kernel" },
   { id: "database", label: "قاعدة البيانات", en: "Database" },
+  { id: "playground", label: "ملعب الكود", en: "Playground" },
   { id: "performance", label: "الأداء", en: "Performance" },
+  { id: "comparison", label: "المقارنة", en: "Comparison" },
   { id: "security", label: "الأمان", en: "Security" },
+  { id: "marketplace", label: "الإضافات", en: "Plugins" },
   { id: "builder", label: "بناء التطبيقات", en: "App Builder" },
+  { id: "cli", label: "CLI", en: "CLI" },
   { id: "docker", label: "Docker", en: "Docker" },
   { id: "roadmap", label: "خارطة الطريق", en: "Roadmap" },
 ];
@@ -65,7 +70,7 @@ export function Navigation() {
           {/* Logo */}
           <button
             onClick={() => scrollTo("hero")}
-            className="flex items-center gap-2.5 group"
+            className="flex items-center gap-2.5 group shrink-0"
           >
             <div className="relative">
               <Hexagon className="w-8 h-8 text-primary group-hover:rotate-90 transition-transform duration-500" strokeWidth={1.5} />
@@ -83,13 +88,13 @@ export function Navigation() {
             </div>
           </button>
 
-          {/* Desktop nav */}
-          <nav className="hidden xl:flex items-center gap-0.5">
+          {/* Desktop nav - scrollable */}
+          <nav className="hidden xl:flex items-center gap-0.5 max-w-[55vw] overflow-x-auto scrollbar-narrow">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.id}
                 onClick={() => scrollTo(item.id)}
-                className={`relative px-2.5 py-2 text-sm rounded-md transition-colors ar ${
+                className={`relative px-2.5 py-2 text-sm rounded-md transition-colors whitespace-nowrap ar ${
                   active === item.id
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
@@ -107,7 +112,7 @@ export function Navigation() {
           </nav>
 
           {/* Right actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Button variant="ghost" size="icon" className="hidden sm:inline-flex">
               <Github className="w-4 h-4" />
             </Button>
@@ -134,7 +139,7 @@ export function Navigation() {
           <motion.nav
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="xl:hidden pb-4 grid grid-cols-2 gap-1.5"
+            className="xl:hidden pb-4 grid grid-cols-2 gap-1.5 max-h-[60vh] overflow-y-auto scrollbar-narrow"
           >
             {NAV_ITEMS.map((item) => (
               <button
