@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { id: "kernel", label: "النواة", en: "Kernel" },
   { id: "database", label: "قاعدة البيانات", en: "Database" },
   { id: "performance", label: "الأداء", en: "Performance" },
+  { id: "security", label: "الأمان", en: "Security" },
+  { id: "builder", label: "بناء التطبيقات", en: "App Builder" },
   { id: "docker", label: "Docker", en: "Docker" },
   { id: "roadmap", label: "خارطة الطريق", en: "Roadmap" },
 ];
@@ -82,12 +84,12 @@ export function Navigation() {
           </button>
 
           {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-1">
+          <nav className="hidden xl:flex items-center gap-0.5">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.id}
                 onClick={() => scrollTo(item.id)}
-                className={`relative px-3 py-2 text-sm rounded-md transition-colors ar ${
+                className={`relative px-2.5 py-2 text-sm rounded-md transition-colors ar ${
                   active === item.id
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
@@ -119,7 +121,7 @@ export function Navigation() {
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden"
+              className="xl:hidden"
               onClick={() => setOpen((o) => !o)}
             >
               {open ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
@@ -132,7 +134,7 @@ export function Navigation() {
           <motion.nav
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="lg:hidden pb-4 grid grid-cols-2 gap-1.5"
+            className="xl:hidden pb-4 grid grid-cols-2 gap-1.5"
           >
             {NAV_ITEMS.map((item) => (
               <button

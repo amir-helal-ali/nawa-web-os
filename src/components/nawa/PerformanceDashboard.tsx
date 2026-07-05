@@ -11,6 +11,9 @@ import {
   Gauge,
   Server,
   ArrowDown,
+  Play,
+  Pause,
+  RotateCcw,
 } from "lucide-react";
 import {
   AreaChart,
@@ -24,26 +27,20 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
+  Cell,
 } from "recharts";
 import { SectionHeader } from "./Concept";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
-// Simulated time-series data
-const RAM_DATA = Array.from({ length: 30 }, (_, i) => ({
-  t: i,
-  nawa: 38 + Math.sin(i * 0.4) * 8 + Math.random() * 4,
-  traditional: 280 + Math.sin(i * 0.3) * 30 + Math.random() * 20,
-}));
-
-const THROUGHPUT_DATA = Array.from({ length: 20 }, (_, i) => ({
-  t: i,
-  rps: 8200 + Math.sin(i * 0.5) * 600 + Math.random() * 300,
-}));
+type SeriesPoint = { t: number; nawa: number; traditional?: number };
 
 const COMPARISON_BARS = [
-  { name: "Cold Start", nawa: 0.18, traditional: 4.2 },
-  { name: "Req p99", nawa: 0.42, traditional: 12.8 },
-  { name: "DB Read", nawa: 0.09, traditional: 1.8 },
-  { name: "SSR Render", nawa: 1.20, traditional: 8.5 },
+  { name: "Cold Start", nawa: 0.18, traditional: 4.2, unit: "s" },
+  { name: "Req p99", nawa: 0.42, traditional: 12.8, unit: "ms" },
+  { name: "DB Read", nawa: 0.09, traditional: 1.8, unit: "ms" },
+  { name: "SSR Render", nawa: 1.2, traditional: 8.5, unit: "ms" },
+  { name: "Idle RAM", nawa: 47, traditional: 360, unit: "MB" },
 ];
 
 const METRICS = [
@@ -54,18 +51,64 @@ const METRICS = [
 ];
 
 export function PerformanceDashboard() {
+  const [ramData, setRamData] = useState<SeriesPoint[]>(() =>
+    Array.from({ length: 30 }, (_, i) => ({
+      t: i,
+      nawa: 38 + Math.sin(i * 0.4) * 8 + Math.random() * 4,
+      traditional: 280 + Math.sin(i * 0.3) * 30 + Math.random() * 20,
+    }))
+  );
+  const [rpsData, setRpsData] = useState<SeriesPoint[]>(() =>
+    Array.from({ length: 20 }, (_, i) => ({
+      t: i,
+      nawa: 8200 + Math.sin(i * 0.5) * 600 + Math.random() * 300,
+    }))
+  );
+  const [running, setRunning] = useState(true);
   const [liveRam, setLiveRam] = useState(47);
   const [liveRps, setLiveRps] = useState(8400);
   const [tick, setTick] = useState(0);
 
+  // Live update loop
   useEffect(() => {
+    if (!running) return;
     const id = setInterval(() => {
-      setLiveRam(38 + Math.random() * 18);
-      setLiveRps(8200 + Math.random() * 600);
+      const newRam = 38 + Math.random() * 18;
+      const newRps = 8200 + Math.random() * 600;
+      setLiveRam(newRam);
+      setLiveRps(newRps);
       setTick((t) => t + 1);
-    }, 1800);
+
+      setRamData((prev) => {
+        const next = [...prev.slice(1), {
+          t: prev[prev.length - 1].t + 1,
+          nawa: newRam,
+          traditional: 280 + Math.random() * 40,
+        }];
+        return next;
+      });
+      setRpsData((prev) => {
+        const next = [...prev.slice(1), {
+          t: prev[prev.length - 1].t + 1,
+          nawa: newRps,
+        }];
+        return next;
+      });
+    }, 1500);
     return () => clearInterval(id);
-  }, []);
+  }, [running]);
+
+  const reset = () => {
+    setRamData(Array.from({ length: 30 }, (_, i) => ({
+      t: i,
+      nawa: 38 + Math.sin(i * 0.4) * 8 + Math.random() * 4,
+      traditional: 280 + Math.sin(i * 0.3) * 30 + Math.random() * 20,
+    })));
+    setRpsData(Array.from({ length: 20 }, (_, i) => ({
+      t: i,
+      nawa: 8200 + Math.sin(i * 0.5) * 600 + Math.random() * 300,
+    })));
+  };
 
   return (
     <section id="performance" className="relative py-24 lg:py-32">
@@ -79,13 +122,44 @@ export function PerformanceDashboard() {
           descEn="The core goal: run a full production app on a cheap VPS with 512MB RAM and a single vCPU. NAWA uses less than 10% of these resources — the rest is yours."
         />
 
+        {/* Live controls bar */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="mt-10 flex items-center justify-between p-3 rounded-xl border border-border/60 bg-card/60"
+        >
+          <div className="flex items-center gap-2">
+            <Activity className={`w-4 h-4 ${running ? "text-accent animate-nawa-pulse" : "text-muted-foreground"}`} />
+            <span className="text-sm font-medium ar">المختبر الحي</span>
+            <Badge variant="outline" className="mono text-[10px]">
+              tick: {tick}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRunning((r) => !r)}
+              className="h-7 px-2 text-xs"
+            >
+              {running ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              <span className="mr-1 ar">{running ? "إيقاف" : "تشغيل"}</span>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={reset} className="h-7 px-2 text-xs">
+              <RotateCcw className="w-3 h-3" />
+            </Button>
+          </div>
+        </motion.div>
+
         {/* Live metrics */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5 }}
-          className="mt-12 grid grid-cols-2 lg:grid-cols-4 gap-3"
+          className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3"
         >
           {METRICS.map((m, i) => (
             <motion.div
@@ -114,7 +188,7 @@ export function PerformanceDashboard() {
         </motion.div>
 
         {/* Charts grid */}
-        <div className="mt-8 grid lg:grid-cols-3 gap-4">
+        <div className="mt-4 grid lg:grid-cols-3 gap-4">
           {/* RAM comparison - big */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -127,10 +201,10 @@ export function PerformanceDashboard() {
               <div>
                 <h4 className="text-sm font-semibold flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-primary" />
-                  استهلاك الذاكرة على مدار 60 ثانية
+                  استهلاك الذاكرة — حي
                 </h4>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Memory footprint — NAWA vs traditional Node+PG+Redis stack
+                  Live memory footprint — NAWA vs traditional Node+PG+Redis
                 </p>
               </div>
               <div className="flex items-center gap-3 text-xs">
@@ -146,7 +220,7 @@ export function PerformanceDashboard() {
             </div>
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={RAM_DATA}>
+                <AreaChart data={ramData}>
                   <defs>
                     <linearGradient id="grad-nawa" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="oklch(0.72 0.19 47)" stopOpacity={0.5} />
@@ -176,6 +250,7 @@ export function PerformanceDashboard() {
                     strokeWidth={1.5}
                     fill="url(#grad-trad)"
                     name="Traditional"
+                    isAnimationActive={false}
                   />
                   <Area
                     type="monotone"
@@ -184,11 +259,11 @@ export function PerformanceDashboard() {
                     strokeWidth={2}
                     fill="url(#grad-nawa)"
                     name="NAWA"
+                    isAnimationActive={false}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            {/* 512MB marker note */}
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <Server className="w-3 h-3" />
               <span className="ar">
@@ -235,7 +310,7 @@ export function PerformanceDashboard() {
                     animate={{
                       strokeDashoffset: 2 * Math.PI * 64 * (1 - Math.min(liveRps / 12000, 1)),
                     }}
-                    transition={{ duration: 1.2, ease: "easeOut" }}
+                    transition={{ duration: 0.8, ease: "easeOut" }}
                   />
                 </svg>
                 <div className="absolute inset-0 grid place-items-center text-center">
@@ -265,14 +340,14 @@ export function PerformanceDashboard() {
           <div className="p-5 rounded-2xl border border-border/60 bg-card/60">
             <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
               <ArrowDown className="w-4 h-4 text-primary" />
-              مقارنة زمن الاستجابة (ms) — أقل أفضل
+              مقارنة الأداء — أقل أفضل
             </h4>
-            <div className="h-48">
+            <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={COMPARISON_BARS} layout="vertical" margin={{ left: 20 }}>
+                <BarChart data={COMPARISON_BARS} layout="vertical" margin={{ left: 30, right: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.28 0.01 60)" strokeOpacity={0.3} horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "oklch(0.65 0.01 60)" }} unit="ms" />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "oklch(0.65 0.01 60)" }} width={70} />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: "oklch(0.65 0.01 60)" }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "oklch(0.65 0.01 60)" }} width={80} />
                   <Tooltip
                     contentStyle={{
                       background: "oklch(0.135 0.008 60)",
@@ -280,6 +355,7 @@ export function PerformanceDashboard() {
                       borderRadius: 8,
                       fontSize: 12,
                     }}
+                    formatter={(value: any, name: any, props: any) => [`${value} ${props.payload.unit}`, name]}
                   />
                   <Bar dataKey="nawa" fill="oklch(0.72 0.19 47)" radius={[0, 4, 4, 0]} name="NAWA" />
                   <Bar dataKey="traditional" fill="oklch(0.65 0.22 25 / 60%)" radius={[0, 4, 4, 0]} name="Traditional" />
@@ -293,9 +369,9 @@ export function PerformanceDashboard() {
               <Activity className="w-4 h-4 text-accent" />
               إنتاجية NAWA المستمرة (rps)
             </h4>
-            <div className="h-48">
+            <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={THROUGHPUT_DATA}>
+                <LineChart data={rpsData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.28 0.01 60)" strokeOpacity={0.3} />
                   <XAxis dataKey="t" tick={{ fontSize: 10, fill: "oklch(0.65 0.01 60)" }} />
                   <YAxis domain={[7000, 10000]} tick={{ fontSize: 10, fill: "oklch(0.65 0.01 60)" }} />
@@ -309,15 +385,66 @@ export function PerformanceDashboard() {
                   />
                   <Line
                     type="monotone"
-                    dataKey="rps"
+                    dataKey="nawa"
                     stroke="oklch(0.78 0.16 165)"
                     strokeWidth={2}
                     dot={false}
                     name="rps"
+                    isAnimationActive={false}
                   />
                 </LineChart>
               </ResponsiveContainer>
             </div>
+          </div>
+        </motion.div>
+
+        {/* Benchmark table */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
+          className="mt-8"
+        >
+          <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
+            <Server className="w-4 h-4 text-primary" />
+            جدول المقارنة الكامل
+            <span className="text-xs text-muted-foreground mono ml-1">{`// NAWA vs traditional stack`}</span>
+          </h4>
+          <div className="rounded-2xl border border-border/60 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-card/60 border-b border-border/40">
+                <tr>
+                  <th className="text-right p-3 text-xs font-medium text-muted-foreground ar">المقياس</th>
+                  <th className="text-right p-3 text-xs font-medium text-muted-foreground">NAWA Target</th>
+                  <th className="text-right p-3 text-xs font-medium text-muted-foreground">Traditional</th>
+                  <th className="text-right p-3 text-xs font-medium text-muted-foreground">Improvement</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/30">
+                {[
+                  ["Idle RAM", "< 50 MB", "~360 MB", "7.2×"],
+                  ["Binary size", "< 15 MB", "~250 MB", "16.7×"],
+                  ["Cold start", "< 200 ms", "~4 s", "20×"],
+                  ["Req p99 latency", "< 1 ms", "~12 ms", "12×"],
+                  ["Throughput (1 vCPU)", "> 8 k rps", "~700 rps", "11.4×"],
+                  ["DB read latency", "< 100 µs", "~1.8 ms", "18×"],
+                  ["SSR render time", "< 2 ms", "~8.5 ms", "4.25×"],
+                  ["Container size", "< 20 MB", "~600 MB", "30×"],
+                ].map(([metric, nawa, trad, improvement]) => (
+                  <tr key={metric} className="hover:bg-primary/5">
+                    <td className="p-3 ar">{metric}</td>
+                    <td className="p-3 mono text-primary">{nawa}</td>
+                    <td className="p-3 mono text-muted-foreground">{trad}</td>
+                    <td className="p-3">
+                      <Badge variant="outline" className="border-accent/40 text-accent mono text-[10px]">
+                        {improvement}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </motion.div>
       </div>

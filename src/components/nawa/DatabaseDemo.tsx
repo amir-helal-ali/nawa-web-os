@@ -1,34 +1,33 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Database,
   KeyRound,
   FileJson,
-  Play,
   Trash2,
-  Plus,
   Search,
   Activity,
   Hash,
   Layers3,
   Zap,
   Lock,
+  Terminal,
+  ChevronRight,
+  CornerDownLeft,
 } from "lucide-react";
 import { SectionHeader } from "./Concept";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type OpLog = {
   id: number;
-  type: "PUT" | "GET" | "DEL" | "SCAN";
+  type: "PUT" | "GET" | "DEL" | "SCAN" | "COUNT" | "BEGIN" | "COMMIT" | "ERROR";
   key: string;
   status: "ok" | "miss" | "err";
-  latency: number; // microseconds
+  latency: number;
   at: number;
+  detail?: string;
 };
 
 type DocValue = {
@@ -71,20 +70,35 @@ const SEED_DATA: Record<string, DocValue> = {
   },
 };
 
+const HELP_TEXT = `Available commands:
+  PUT <key> <value>              Store a key-value pair
+  PUT <key> <json>               Store a document (auto-detected)
+  GET <key>                      Fetch value by key
+  DEL <key>                      Delete a key
+  SCAN <prefix>                  List all keys with prefix
+  COUNT                          Count all keys
+  BEGIN / COMMIT                 Transaction (simulated)
+  HELP                           Show this help
+  CLEAR                          Clear the screen`;
+
 export function DatabaseDemo() {
   const [store, setStore] = useState<Record<string, DocValue>>(SEED_DATA);
   const [log, setLog] = useState<OpLog[]>([]);
-  const [keyInput, setKeyInput] = useState("");
-  const [valueInput, setValueInput] = useState("");
-  const [mode, setMode] = useState<"kv" | "doc">("kv");
-  const [searchKey, setSearchKey] = useState("");
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [input, setInput] = useState("");
+  const [output, setOutput] = useState<Array<{ type: "in" | "out" | "err"; text: string }>>([
+    { type: "out", text: "NAWA-DB shell v0.1.0 — type HELP for commands, ↑↓ for history" },
+    { type: "out", text: "" },
+  ]);
   const [opCounter, setOpCounter] = useState(0);
   const [totalLatency, setTotalLatency] = useState(0);
-  const logRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    logRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [log]);
+    outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight, behavior: "smooth" });
+  }, [output]);
 
   const pushLog = useCallback((op: OpLog) => {
     setLog((l) => [op, ...l].slice(0, 50));
@@ -92,87 +106,252 @@ export function DatabaseDemo() {
     setTotalLatency((t) => t + op.latency);
   }, []);
 
-  const simulateLatency = () => Math.floor(80 + Math.random() * 280); // microseconds
+  const simulateLatency = () => Math.floor(80 + Math.random() * 280);
 
-  const handlePut = () => {
-    if (!keyInput.trim()) return;
-    let parsedValue: any = valueInput;
-    if (mode === "doc") {
-      try {
-        parsedValue = JSON.parse(valueInput || "{}");
-      } catch {
-        pushLog({
-          id: Date.now(),
-          type: "PUT",
-          key: keyInput,
-          status: "err",
-          latency: simulateLatency(),
-          at: Date.now(),
-        });
-        return;
+  const addOutput = (lines: Array<{ type: "in" | "out" | "err"; text: string }>) => {
+    setOutput((o) => [...o, ...lines]);
+  };
+
+  const execute = useCallback(
+    (raw: string) => {
+      const cmd = raw.trim();
+      if (!cmd) return;
+
+      // Echo input
+      addOutput([{ type: "in", text: cmd }]);
+
+      // Save history
+      setHistory((h) => [...h, cmd]);
+      setHistoryIdx(-1);
+
+      const parts = cmd.split(/\s+/);
+      const verb = parts[0].toUpperCase();
+
+      switch (verb) {
+        case "HELP": {
+          addOutput(HELP_TEXT.split("\n").map((t) => ({ type: "out" as const, text: t })));
+          break;
+        }
+        case "CLEAR": {
+          setOutput([]);
+          break;
+        }
+        case "PUT": {
+          if (parts.length < 3) {
+            addOutput([{ type: "err", text: "Usage: PUT <key> <value>" }]);
+            pushLog({
+              id: Date.now(),
+              type: "ERROR",
+              key: parts[1] || "?",
+              status: "err",
+              latency: 0,
+              at: Date.now(),
+              detail: "bad args",
+            });
+            break;
+          }
+          const key = parts[1];
+          const valueStr = parts.slice(2).join(" ");
+          let parsedValue: any = valueStr;
+          let type: "kv" | "doc" = "kv";
+
+          // Try JSON parse
+          if (valueStr.startsWith("{") || valueStr.startsWith("[")) {
+            try {
+              parsedValue = JSON.parse(valueStr);
+              type = "doc";
+            } catch {
+              addOutput([{ type: "err", text: `Invalid JSON: ${valueStr}` }]);
+              pushLog({
+                id: Date.now(),
+                type: "ERROR",
+                key,
+                status: "err",
+                latency: simulateLatency(),
+                at: Date.now(),
+                detail: "invalid JSON",
+              });
+              break;
+            }
+          } else if (/^-?\d+$/.test(valueStr)) {
+            parsedValue = parseInt(valueStr);
+          } else if (/^-?\d*\.\d+$/.test(valueStr)) {
+            parsedValue = parseFloat(valueStr);
+          }
+
+          setStore((s) => ({ ...s, [key]: { type, v: parsedValue } }));
+          const lat = simulateLatency();
+          pushLog({
+            id: Date.now(),
+            type: "PUT",
+            key,
+            status: "ok",
+            latency: lat,
+            at: Date.now(),
+          });
+          addOutput([
+            { type: "out", text: `OK  ${key} → ${type === "doc" ? "<doc>" : JSON.stringify(parsedValue)} (${lat}μs)` },
+          ]);
+          break;
+        }
+        case "GET": {
+          if (parts.length < 2) {
+            addOutput([{ type: "err", text: "Usage: GET <key>" }]);
+            break;
+          }
+          const key = parts[1];
+          const found = store[key];
+          const lat = simulateLatency();
+          pushLog({
+            id: Date.now(),
+            type: "GET",
+            key,
+            status: found ? "ok" : "miss",
+            latency: lat,
+            at: Date.now(),
+          });
+          if (found) {
+            addOutput([
+              {
+                type: "out",
+                text: `${JSON.stringify(found.v, null, 2)}  (${lat}μs, ${found.type})`,
+              },
+            ]);
+          } else {
+            addOutput([{ type: "err", text: `MISS  key "${key}" not found (${lat}μs)` }]);
+          }
+          break;
+        }
+        case "DEL": {
+          if (parts.length < 2) {
+            addOutput([{ type: "err", text: "Usage: DEL <key>" }]);
+            break;
+          }
+          const key = parts[1];
+          setStore((s) => {
+            const next = { ...s };
+            delete next[key];
+            return next;
+          });
+          const lat = simulateLatency();
+          pushLog({
+            id: Date.now(),
+            type: "DEL",
+            key,
+            status: "ok",
+            latency: lat,
+            at: Date.now(),
+          });
+          addOutput([{ type: "out", text: `OK  deleted ${key} (${lat}μs)` }]);
+          break;
+        }
+        case "SCAN": {
+          const prefix = parts[1] || "";
+          const matches = Object.keys(store).filter((k) => k.startsWith(prefix));
+          const lat = Math.floor(400 + Math.random() * 600);
+          pushLog({
+            id: Date.now(),
+            type: "SCAN",
+            key: prefix || "*",
+            status: "ok",
+            latency: lat,
+            at: Date.now(),
+          });
+          if (matches.length === 0) {
+            addOutput([{ type: "out", text: `(empty)  no keys matching "${prefix}*" (${lat}μs)` }]);
+          } else {
+            addOutput([
+              { type: "out", text: `${matches.length} keys matching "${prefix}*" (${lat}μs):` },
+              ...matches.map((k) => ({
+                type: "out" as const,
+                text: `  ${k}  →  ${
+                  store[k].type === "doc"
+                    ? "<doc>"
+                    : JSON.stringify(store[k].v).slice(0, 40)
+                }`,
+              })),
+            ]);
+          }
+          break;
+        }
+        case "COUNT": {
+          const count = Object.keys(store).length;
+          const lat = Math.floor(50 + Math.random() * 100);
+          pushLog({
+            id: Date.now(),
+            type: "COUNT",
+            key: "*",
+            status: "ok",
+            latency: lat,
+            at: Date.now(),
+          });
+          addOutput([{ type: "out", text: `${count} keys in store (${lat}μs)` }]);
+          break;
+        }
+        case "BEGIN": {
+          const lat = Math.floor(30 + Math.random() * 60);
+          pushLog({
+            id: Date.now(),
+            type: "BEGIN",
+            key: "tx",
+            status: "ok",
+            latency: lat,
+            at: Date.now(),
+          });
+          addOutput([{ type: "out", text: `transaction started (${lat}μs)` }]);
+          break;
+        }
+        case "COMMIT": {
+          const lat = Math.floor(100 + Math.random() * 200);
+          pushLog({
+            id: Date.now(),
+            type: "COMMIT",
+            key: "tx",
+            status: "ok",
+            latency: lat,
+            at: Date.now(),
+          });
+          addOutput([{ type: "out", text: `transaction committed + WAL fsync'd (${lat}μs)` }]);
+          break;
+        }
+        default: {
+          addOutput([{ type: "err", text: `Unknown command: ${verb}. Type HELP for commands.` }]);
+        }
       }
-    } else {
-      // try numeric
-      if (/^-?\d+$/.test(valueInput)) parsedValue = parseInt(valueInput);
-      else if (/^-?\d*\.\d+$/.test(valueInput)) parsedValue = parseFloat(valueInput);
-    }
-    setStore((s) => ({ ...s, [keyInput]: { type: mode, v: parsedValue } }));
-    pushLog({
-      id: Date.now(),
-      type: "PUT",
-      key: keyInput,
-      status: "ok",
-      latency: simulateLatency(),
-      at: Date.now(),
-    });
-    setKeyInput("");
-    setValueInput("");
-  };
-
-  const handleGet = (k: string) => {
-    const found = !!store[k];
-    pushLog({
-      id: Date.now(),
-      type: "GET",
-      key: k,
-      status: found ? "ok" : "miss",
-      latency: simulateLatency(),
-      at: Date.now(),
-    });
-  };
-
-  const handleDel = (k: string) => {
-    setStore((s) => {
-      const next = { ...s };
-      delete next[k];
-      return next;
-    });
-    pushLog({
-      id: Date.now(),
-      type: "DEL",
-      key: k,
-      status: "ok",
-      latency: simulateLatency(),
-      at: Date.now(),
-    });
-  };
-
-  const handleScan = () => {
-    pushLog({
-      id: Date.now(),
-      type: "SCAN",
-      key: "*",
-      status: "ok",
-      latency: Math.floor(400 + Math.random() * 600),
-      at: Date.now(),
-    });
-  };
-
-  const filteredKeys = Object.keys(store).filter((k) =>
-    k.toLowerCase().includes(searchKey.toLowerCase())
+      addOutput([{ type: "out", text: "" }]);
+    },
+    [store, pushLog]
   );
 
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    execute(input);
+    setInput("");
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (history.length === 0) return;
+      const newIdx = historyIdx === -1 ? history.length - 1 : Math.max(0, historyIdx - 1);
+      setHistoryIdx(newIdx);
+      setInput(history[newIdx]);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIdx === -1) return;
+      const newIdx = historyIdx + 1;
+      if (newIdx >= history.length) {
+        setHistoryIdx(-1);
+        setInput("");
+      } else {
+        setHistoryIdx(newIdx);
+        setInput(history[newIdx]);
+      }
+    }
+  };
+
   const avgLatency = opCounter > 0 ? Math.round(totalLatency / opCounter) : 0;
+  const filteredKeys = Object.keys(store);
 
   return (
     <section id="database" className="relative py-24 lg:py-32 bg-card/30">
@@ -211,20 +390,21 @@ export function DatabaseDemo() {
           ))}
         </motion.div>
 
-        {/* Live demo */}
+        {/* Live Shell */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
-          className="mt-10"
+          className="mt-10 grid lg:grid-cols-5 gap-4"
         >
-          <div className="rounded-2xl border border-border/60 overflow-hidden bg-[#0d0c0a]">
-            {/* Terminal-style header */}
+          {/* Shell terminal - left, 3/5 width */}
+          <div className="lg:col-span-3 rounded-2xl border border-border/60 overflow-hidden bg-[#0d0c0a]">
+            {/* Terminal header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40 bg-card/60">
               <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium mono">nawa-db</span>
+                <Terminal className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium mono">nawa-db shell</span>
                 <Badge variant="outline" className="mono text-[10px]">
                   in-process
                 </Badge>
@@ -232,7 +412,7 @@ export function DatabaseDemo() {
               <div className="flex items-center gap-3 text-xs">
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">keys:</span>
-                  <span className="mono text-primary font-medium">{Object.keys(store).length}</span>
+                  <span className="mono text-primary font-medium">{filteredKeys.length}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">avg:</span>
@@ -245,242 +425,215 @@ export function DatabaseDemo() {
               </div>
             </div>
 
-            <Tabs defaultValue="explorer" className="w-full">
-              <div className="px-4 pt-3 border-b border-border/40">
-                <TabsList className="bg-transparent h-auto p-0">
-                  <TabsTrigger
-                    value="explorer"
-                    className="data-[state=active]:bg-primary/15 data-[state=active]:text-primary rounded-md px-3 py-1.5 text-xs mono"
-                  >
-                    EXPLORER
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="ops"
-                    className="data-[state=active]:bg-primary/15 data-[state=active]:text-primary rounded-md px-3 py-1.5 text-xs mono"
-                  >
-                    OP LOG
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="schema"
-                    className="data-[state=active]:bg-primary/15 data-[state=active]:text-primary rounded-md px-3 py-1.5 text-xs mono"
-                  >
-                    INTERNALS
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-
-              {/* Explorer */}
-              <TabsContent value="explorer" className="m-0 p-4">
-                <div className="grid lg:grid-cols-2 gap-4">
-                  {/* Left: write panel */}
-                  <div className="space-y-3">
-                    <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Write
-                    </div>
-                    <div className="flex gap-1.5 p-1 rounded-lg bg-card/60 border border-border/40">
-                      <button
-                        onClick={() => setMode("kv")}
-                        className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
-                          mode === "kv"
-                            ? "bg-primary/20 text-primary"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <KeyRound className="w-3 h-3" /> KV
-                      </button>
-                      <button
-                        onClick={() => setMode("doc")}
-                        className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
-                          mode === "doc"
-                            ? "bg-primary/20 text-primary"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <FileJson className="w-3 h-3" /> Document
-                      </button>
-                    </div>
-                    <Input
-                      placeholder="key — e.g. user:1003"
-                      value={keyInput}
-                      onChange={(e) => setKeyInput(e.target.value)}
-                      className="mono bg-card/60 border-border/60 text-sm"
-                    />
-                    <textarea
-                      placeholder={
-                        mode === "kv"
-                          ? "value — string or number"
-                          : '{ "name": "new user", "roles": [] }'
-                      }
-                      value={valueInput}
-                      onChange={(e) => setValueInput(e.target.value)}
-                      rows={mode === "doc" ? 5 : 2}
-                      className="w-full mono bg-card/60 border border-border/60 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="bg-primary hover:bg-primary/90 text-primary-foreground flex-1"
-                        onClick={handlePut}
-                      >
-                        <Plus className="w-3.5 h-3.5 ml-1" />
-                        <span className="ar">نفّذ PUT</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleScan}
-                        className="border-primary/40 hover:bg-primary/10"
-                      >
-                        <Activity className="w-3.5 h-3.5 ml-1" />
-                        SCAN *
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Right: stored keys list */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Keys ({filteredKeys.length})
-                      </div>
-                      <div className="relative w-32">
-                        <Search className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          placeholder="filter..."
-                          value={searchKey}
-                          onChange={(e) => setSearchKey(e.target.value)}
-                          className="h-7 text-xs pl-2 pr-7 mono bg-card/60 border-border/60"
-                        />
-                      </div>
-                    </div>
-                    <div className="max-h-72 overflow-y-auto scrollbar-narrow space-y-1 rounded-lg border border-border/40 bg-card/40">
-                      {filteredKeys.length === 0 && (
-                        <div className="p-4 text-center text-xs text-muted-foreground ar">
-                          لا توجد مفاتيح مطابقة
-                        </div>
-                      )}
-                      {filteredKeys.map((k) => {
-                        const v = store[k];
-                        const isDoc = v.type === "doc";
-                        return (
-                          <div
-                            key={k}
-                            className="group flex items-center gap-2 px-3 py-2 hover:bg-primary/5 border-b border-border/20 last:border-0"
-                          >
-                            <div
-                              className={`p-1 rounded ${
-                                isDoc ? "bg-accent/15 text-accent" : "bg-primary/15 text-primary"
-                              }`}
-                            >
-                              {isDoc ? <FileJson className="w-3 h-3" /> : <KeyRound className="w-3 h-3" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs mono truncate">{k}</div>
-                              <div className="text-[10px] text-muted-foreground truncate">
-                                {isDoc ? JSON.stringify(v.v).slice(0, 60) : String(v.v)}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleGet(k)}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-primary/20 text-primary transition"
-                              title="GET"
-                            >
-                              <Play className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDel(k)}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 text-destructive transition"
-                              title="DEL"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Op log */}
-              <TabsContent value="ops" className="m-0 p-4">
-                <div ref={logRef} className="max-h-96 overflow-y-auto scrollbar-narrow space-y-1">
-                  {log.length === 0 && (
-                    <div className="p-8 text-center text-sm text-muted-foreground ar">
-                      لا توجد عمليات بعد — جرّب PUT أو GET
-                    </div>
+            {/* Output */}
+            <div
+              ref={outputRef}
+              onClick={() => inputRef.current?.focus()}
+              className="h-80 overflow-y-auto scrollbar-narrow p-4 font-mono text-xs leading-relaxed cursor-text"
+            >
+              {output.map((line, i) => (
+                <div
+                  key={i}
+                  className={`whitespace-pre-wrap break-words ${
+                    line.type === "in"
+                      ? "text-primary"
+                      : line.type === "err"
+                      ? "text-destructive"
+                      : "text-foreground/80"
+                  }`}
+                >
+                  {line.type === "in" ? (
+                    <span className="flex gap-2">
+                      <span className="text-accent">nawa&gt;</span>
+                      <span>{line.text}</span>
+                    </span>
+                  ) : (
+                    line.text || " "
                   )}
-                  {log.map((op) => (
-                    <motion.div
-                      key={op.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="flex items-center gap-3 px-3 py-1.5 rounded text-xs font-mono hover:bg-card/60"
-                    >
-                      <span className="text-muted-foreground/60 w-16">
-                        {new Date(op.at).toLocaleTimeString("en-US", { hour12: false })}
-                      </span>
-                      <span
-                        className={`w-12 font-bold ${
-                          op.type === "PUT"
-                            ? "text-primary"
-                            : op.type === "GET"
-                            ? "text-accent"
-                            : op.type === "DEL"
-                            ? "text-destructive"
-                            : "text-yellow-400"
-                        }`}
-                      >
-                        {op.type}
-                      </span>
-                      <span className="flex-1 truncate text-foreground/90">{op.key}</span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] ${
-                          op.status === "ok"
-                            ? "bg-green-500/15 text-green-400"
-                            : op.status === "miss"
-                            ? "bg-yellow-500/15 text-yellow-400"
-                            : "bg-destructive/15 text-destructive"
-                        }`}
-                      >
-                        {op.status}
-                      </span>
-                      <span className="text-muted-foreground w-16 text-right">{op.latency}μs</span>
-                    </motion.div>
-                  ))}
                 </div>
-              </TabsContent>
+              ))}
+              {/* Prompt + input */}
+              <form onSubmit={onSubmit} className="flex items-center gap-2 mt-1">
+                <span className="text-accent shrink-0">nawa&gt;</span>
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={onKeyDown}
+                  placeholder={'type a command (try: HELP, PUT user:1 {"name":"test"})'}
+                  className="flex-1 bg-transparent border-0 outline-none text-foreground placeholder:text-muted-foreground/50 font-mono text-xs"
+                  autoFocus
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <CornerDownLeft className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+              </form>
+            </div>
 
-              {/* Internals */}
-              <TabsContent value="schema" className="m-0 p-4">
-                <div className="grid sm:grid-cols-2 gap-3">
-                  {INTERNALS.map((layer) => (
-                    <div
-                      key={layer.name}
-                      className="p-4 rounded-lg border border-border/40 bg-card/40"
+            {/* Quick commands bar */}
+            <div className="px-3 py-2 border-t border-border/40 bg-card/40 flex flex-wrap gap-1">
+              {["HELP", "SCAN", "COUNT", "GET user:1001", "PUT counter:x 42", "BEGIN"].map(
+                (c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setInput(c);
+                      inputRef.current?.focus();
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] mono bg-card/80 border border-border/40 hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    {c}
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+
+          {/* Right side: op log + internals */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Op log */}
+            <div className="rounded-2xl border border-border/60 overflow-hidden bg-[#0d0c0a]">
+              <div className="px-4 py-2.5 border-b border-border/40 bg-card/60 flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-accent" />
+                <span className="text-xs font-medium mono">OP LOG</span>
+                <span className="text-[10px] text-muted-foreground mono ml-auto">live</span>
+              </div>
+              <div className="h-44 overflow-y-auto scrollbar-narrow p-2">
+                {log.length === 0 && (
+                  <div className="p-6 text-center text-xs text-muted-foreground ar">
+                    لا توجد عمليات بعد
+                  </div>
+                )}
+                {log.map((op) => (
+                  <motion.div
+                    key={op.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-2 px-2 py-1 rounded text-[10px] font-mono hover:bg-card/60"
+                  >
+                    <span className="text-muted-foreground/60 w-14">
+                      {new Date(op.at).toLocaleTimeString("en-US", { hour12: false })}
+                    </span>
+                    <span
+                      className={`w-14 font-bold ${
+                        op.type === "PUT"
+                          ? "text-primary"
+                          : op.type === "GET"
+                          ? "text-accent"
+                          : op.type === "DEL"
+                          ? "text-destructive"
+                          : op.type === "ERROR"
+                          ? "text-destructive"
+                          : "text-yellow-400"
+                      }`}
                     >
-                      <div className="flex items-center gap-2 mb-2">
-                        <layer.icon className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium mono">{layer.name}</span>
+                      {op.type}
+                    </span>
+                    <span className="flex-1 truncate text-foreground/90">{op.key}</span>
+                    <span
+                      className={`px-1 rounded text-[9px] ${
+                        op.status === "ok"
+                          ? "bg-green-500/15 text-green-400"
+                          : op.status === "miss"
+                          ? "bg-yellow-500/15 text-yellow-400"
+                          : "bg-destructive/15 text-destructive"
+                      }`}
+                    >
+                      {op.status}
+                    </span>
+                    <span className="text-muted-foreground w-12 text-right">{op.latency}μs</span>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            {/* Keys explorer */}
+            <div className="rounded-2xl border border-border/60 overflow-hidden bg-[#0d0c0a]">
+              <div className="px-4 py-2.5 border-b border-border/40 bg-card/60 flex items-center gap-2">
+                <Database className="w-3.5 h-3.5 text-primary" />
+                <span className="text-xs font-medium mono">KEYS ({filteredKeys.length})</span>
+              </div>
+              <div className="h-44 overflow-y-auto scrollbar-narrow">
+                {filteredKeys.map((k) => {
+                  const v = store[k];
+                  const isDoc = v.type === "doc";
+                  return (
+                    <div
+                      key={k}
+                      className="group flex items-center gap-2 px-3 py-1.5 hover:bg-primary/5 border-b border-border/20 last:border-0"
+                    >
+                      <div
+                        className={`p-1 rounded ${
+                          isDoc ? "bg-accent/15 text-accent" : "bg-primary/15 text-primary"
+                        }`}
+                      >
+                        {isDoc ? <FileJson className="w-2.5 h-2.5" /> : <KeyRound className="w-2.5 h-2.5" />}
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed ar">
-                        {layer.desc}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {layer.tags.map((t) => (
-                          <span
-                            key={t}
-                            className="px-1.5 py-0.5 rounded text-[10px] mono bg-primary/10 text-primary"
-                          >
-                            {t}
-                          </span>
-                        ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[10px] mono truncate">{k}</div>
+                        <div className="text-[9px] text-muted-foreground truncate">
+                          {isDoc ? JSON.stringify(v.v).slice(0, 50) : String(v.v)}
+                        </div>
                       </div>
+                      <button
+                        onClick={() => {
+                          setInput(`GET ${k}`);
+                          inputRef.current?.focus();
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-[9px] mono text-primary hover:underline"
+                      >
+                        GET
+                      </button>
+                      <button
+                        onClick={() => execute(`DEL ${k}`)}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/20 text-destructive transition"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                      </button>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* DB internals */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="mt-8"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Layers3 className="w-4 h-4 text-primary" />
+            <h4 className="text-sm font-semibold ar">طبقات التخزين الداخلية</h4>
+            <span className="text-xs text-muted-foreground mono">{`// storage internals`}</span>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {INTERNALS.map((layer) => (
+              <div
+                key={layer.name}
+                className="p-4 rounded-lg border border-border/40 bg-card/40 hover:border-primary/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <layer.icon className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium mono">{layer.name}</span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed ar">{layer.desc}</p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {layer.tags.map((t) => (
+                    <span
+                      key={t}
+                      className="px-1.5 py-0.5 rounded text-[10px] mono bg-primary/10 text-primary"
+                    >
+                      {t}
+                    </span>
                   ))}
                 </div>
-              </TabsContent>
-            </Tabs>
+              </div>
+            ))}
           </div>
         </motion.div>
       </div>
@@ -518,6 +671,6 @@ const INTERNALS = [
     name: "Bloom Filter",
     icon: Search,
     desc: "فلتر احتمالي لكل SSTable — يخبرك فوراً إن كان المفتاح غير موجود دون قراءة الملف.",
-    tags: ["O(1)", "probabilistic", "false-positive: 1%"],
+    tags: ["O(1)", "probabilistic", "fp: 1%"],
   },
 ];

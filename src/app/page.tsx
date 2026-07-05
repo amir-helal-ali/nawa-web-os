@@ -5,6 +5,8 @@ import { Architecture } from "@/components/nawa/Architecture";
 import { ZeroCopyKernel } from "@/components/nawa/ZeroCopyKernel";
 import { DatabaseDemo } from "@/components/nawa/DatabaseDemo";
 import { PerformanceDashboard } from "@/components/nawa/PerformanceDashboard";
+import { SecurityLayer } from "@/components/nawa/SecurityLayer";
+import { AppBuilder } from "@/components/nawa/AppBuilder";
 import { DockerDeployment } from "@/components/nawa/DockerDeployment";
 import { Roadmap } from "@/components/nawa/Roadmap";
 import { Footer } from "@/components/nawa/Footer";
@@ -19,6 +21,8 @@ export default function Home() {
       <ZeroCopyKernel />
       <DatabaseDemo />
       <PerformanceDashboard />
+      <SecurityLayer />
+      <AppBuilder />
       <DockerDeployment />
       <Roadmap />
       <Footer />

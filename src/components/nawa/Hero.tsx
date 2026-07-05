@@ -1,6 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { motion, useMotionValue, useTransform, animate } from "framer-motion";
 import {
   Hexagon,
   ArrowLeft,
@@ -9,21 +10,108 @@ import {
   Feather,
   Cpu,
   Terminal,
+  Cpu as CpuIcon,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const STATS = [
-  { value: "100%", label: "Rust", sub: "zero unsafe" },
-  { value: "512MB", label: "RAM", sub: "minimum target" },
-  { value: "2×", label: "Engines", sub: "backend + frontend" },
-  { value: "0", label: "external deps", sub: "DB built-in" },
-];
+// Animated counter
+function AnimatedCounter({
+  value,
+  format = (v: number) => v.toString(),
+  duration = 2,
+}: {
+  value: number;
+  format?: (v: number) => string;
+  duration?: number;
+}) {
+  const count = useMotionValue(0);
+  const rounded = useTransform(count, (latest) => format(latest));
+  const [display, setDisplay] = useState("0");
+
+  useEffect(() => {
+    const unsub = rounded.on("change", (v) => setDisplay(v));
+    const controls = animate(count, value, { duration, ease: "easeOut" });
+    return () => {
+      controls.stop();
+      unsub();
+    };
+  }, [value, duration, rounded, count]);
+
+  return <span className="mono">{display}</span>;
+}
+
+// Live "breathing" KPI - simulates real-time metric
+function LiveKPI({
+  label,
+  unit,
+  base,
+  variance,
+  color,
+  icon: Icon,
+}: {
+  label: string;
+  unit: string;
+  base: number;
+  variance: number;
+  color: "primary" | "accent";
+  icon: typeof Zap;
+}) {
+  const [value, setValue] = useState(base);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setValue(base + (Math.random() - 0.5) * 2 * variance);
+    }, 1500);
+    return () => clearInterval(id);
+  }, [base, variance]);
+
+  return (
+    <div className="relative p-3 rounded-lg border border-border/40 bg-card/60 overflow-hidden">
+      <div
+        className={`absolute top-0 left-0 h-0.5 ${
+          color === "primary" ? "bg-primary" : "bg-accent"
+        }`}
+        style={{ width: `${Math.min((value / (base + variance)) * 100, 100)}%` }}
+      />
+      <div className="flex items-center justify-between mb-1">
+        <Icon
+          className={`w-3.5 h-3.5 ${color === "primary" ? "text-primary" : "text-accent"}`}
+          strokeWidth={1.5}
+        />
+        <span className="relative flex h-1.5 w-1.5">
+          <span
+            className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-nawa-pulse ${
+              color === "primary" ? "bg-primary" : "bg-accent"
+            }`}
+          />
+          <span
+            className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+              color === "primary" ? "bg-primary" : "bg-accent"
+            }`}
+          />
+        </span>
+      </div>
+      <div className="flex items-baseline gap-1">
+        <span
+          className={`text-lg font-bold mono ${
+            color === "primary" ? "text-primary" : "text-accent"
+          }`}
+        >
+          {value.toFixed(unit === "rps" ? 0 : value < 10 ? 1 : 0)}
+        </span>
+        <span className="text-[10px] text-muted-foreground">{unit}</span>
+      </div>
+      <div className="text-[10px] text-muted-foreground ar">{label}</div>
+    </div>
+  );
+}
 
 const PILLARS = [
-  { icon: Zap, label: "القوة", en: "Power" },
-  { icon: ShieldCheck, label: "الأمان", en: "Security" },
-  { icon: Feather, label: "المرونة", en: "Flexibility" },
-  { icon: Cpu, label: "كفاءة السيرفرات الضعيفة", en: "Low-spec efficient" },
+  { icon: Zap, label: "القوة", en: "Power", color: "primary" },
+  { icon: ShieldCheck, label: "الأمان", en: "Security", color: "accent" },
+  { icon: Feather, label: "المرونة", en: "Flexibility", color: "primary" },
+  { icon: Cpu, label: "كفاءة السيرفرات الضعيفة", en: "Low-spec efficient", color: "accent" },
 ];
 
 export function Hero() {
@@ -39,8 +127,13 @@ export function Hero() {
         <div className="absolute bottom-1/4 -right-32 w-[480px] h-[480px] rounded-full bg-accent/10 blur-[120px]" />
       </div>
 
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full py-12 lg:py-20">
-        <div className="grid lg:grid-cols-12 gap-10 lg:gap-16 items-center">
+      {/* Scan line at top */}
+      <div className="absolute top-16 inset-x-0 h-px overflow-hidden pointer-events-none">
+        <div className="w-full h-full bg-gradient-to-r from-transparent via-primary/50 to-transparent animate-nawa-scan" />
+      </div>
+
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full py-12 lg:py-16">
+        <div className="grid lg:grid-cols-12 gap-10 lg:gap-12 items-center">
           {/* Left content */}
           <div className="lg:col-span-7">
             {/* Eyebrow */}
@@ -124,18 +217,66 @@ export function Hero() {
               </Button>
             </motion.div>
 
-            {/* Stats */}
+            {/* KPI live grid */}
             <motion.div
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.45 }}
-              className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-px bg-border/40 rounded-xl overflow-hidden border border-border/40"
+              className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-2"
             >
-              {STATS.map((s) => (
-                <div key={s.label} className="bg-card p-4">
-                  <div className="text-2xl font-bold text-primary mono">{s.value}</div>
-                  <div className="text-xs text-foreground mt-1">{s.label}</div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">{s.sub}</div>
+              <LiveKPI
+                label="استهلاك RAM"
+                unit="MB"
+                base={47}
+                variance={6}
+                color="primary"
+                icon={CpuIcon}
+              />
+              <LiveKPI
+                label="الإنتاجية"
+                unit="rps"
+                base={8400}
+                variance={500}
+                color="accent"
+                icon={Activity}
+              />
+              <LiveKPI
+                label="زمن الاستجابة p99"
+                unit="ms"
+                base={0.42}
+                variance={0.15}
+                color="primary"
+                icon={Zap}
+              />
+              <LiveKPI
+                label="DB latency"
+                unit="μs"
+                base={92}
+                variance={20}
+                color="accent"
+                icon={ShieldCheck}
+              />
+            </motion.div>
+
+            {/* Comparison stats */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.55 }}
+              className="mt-6 grid grid-cols-4 gap-px bg-border/40 rounded-xl overflow-hidden border border-border/40"
+            >
+              {[
+                { value: 100, suffix: "%", label: "Rust", sub: "zero unsafe" },
+                { value: 512, suffix: "MB", label: "RAM", sub: "min target" },
+                { value: 2, suffix: "×", label: "Engines", sub: "back + front" },
+                { value: 0, suffix: "", label: "deps", sub: "DB built-in" },
+              ].map((s) => (
+                <div key={s.label} className="bg-card p-3">
+                  <div className="text-xl font-bold text-primary mono">
+                    <AnimatedCounter value={s.value} format={(v) => `${Math.round(v)}${s.suffix}`} />
+                  </div>
+                  <div className="text-xs text-foreground mt-0.5">{s.label}</div>
+                  <div className="text-[10px] text-muted-foreground">{s.sub}</div>
                 </div>
               ))}
             </motion.div>
@@ -156,18 +297,23 @@ export function Hero() {
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.6 }}
-          className="mt-16 lg:mt-20 grid grid-cols-2 lg:grid-cols-4 gap-3"
+          transition={{ duration: 0.6, delay: 0.65 }}
+          className="mt-12 grid grid-cols-2 lg:grid-cols-4 gap-3"
         >
           {PILLARS.map((p, i) => (
             <motion.div
               key={p.en}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.65 + i * 0.08 }}
+              transition={{ duration: 0.4, delay: 0.7 + i * 0.08 }}
               className="group relative p-4 rounded-xl border border-border/60 bg-card/40 hover:bg-card hover:border-primary/40 transition-all"
             >
-              <p.icon className="w-6 h-6 text-primary mb-2 group-hover:scale-110 transition-transform" strokeWidth={1.5} />
+              <p.icon
+                className={`w-6 h-6 mb-2 group-hover:scale-110 transition-transform ${
+                  p.color === "primary" ? "text-primary" : "text-accent"
+                }`}
+                strokeWidth={1.5}
+              />
               <div className="text-sm font-medium ar">{p.label}</div>
               <div className="text-[11px] text-muted-foreground mt-0.5">{p.en}</div>
             </motion.div>
