@@ -54,14 +54,14 @@ export function PerformanceDashboard() {
   const [ramData, setRamData] = useState<SeriesPoint[]>(() =>
     Array.from({ length: 30 }, (_, i) => ({
       t: i,
-      nawa: 38 + Math.sin(i * 0.4) * 8 + Math.random() * 4,
-      traditional: 280 + Math.sin(i * 0.3) * 30 + Math.random() * 20,
+      nawa: 38 + Math.sin(i * 0.4) * 8,
+      traditional: 280 + Math.sin(i * 0.3) * 30,
     }))
   );
   const [rpsData, setRpsData] = useState<SeriesPoint[]>(() =>
     Array.from({ length: 20 }, (_, i) => ({
       t: i,
-      nawa: 8200 + Math.sin(i * 0.5) * 600 + Math.random() * 300,
+      nawa: 8200 + Math.sin(i * 0.5) * 600,
     }))
   );
   const [running, setRunning] = useState(true);

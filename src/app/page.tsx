@@ -9,11 +9,15 @@ import { CodePlayground } from "@/components/nawa/CodePlayground";
 import { PerformanceDashboard } from "@/components/nawa/PerformanceDashboard";
 import { StackComparison } from "@/components/nawa/StackComparison";
 import { SecurityLayer } from "@/components/nawa/SecurityLayer";
+import { Observability } from "@/components/nawa/Observability";
 import { PluginMarketplace } from "@/components/nawa/PluginMarketplace";
+import { DeveloperExperience } from "@/components/nawa/DeveloperExperience";
 import { AppBuilder } from "@/components/nawa/AppBuilder";
 import { CLISimulator } from "@/components/nawa/CLISimulator";
+import { Ecosystem } from "@/components/nawa/Ecosystem";
 import { DockerDeployment } from "@/components/nawa/DockerDeployment";
 import { Roadmap } from "@/components/nawa/Roadmap";
+import { FAQ } from "@/components/nawa/FAQ";
 import { Footer } from "@/components/nawa/Footer";
 
 export default function Home() {
@@ -30,11 +34,15 @@ export default function Home() {
       <PerformanceDashboard />
       <StackComparison />
       <SecurityLayer />
+      <Observability />
       <PluginMarketplace />
+      <DeveloperExperience />
       <AppBuilder />
       <CLISimulator />
+      <Ecosystem />
       <DockerDeployment />
       <Roadmap />
+      <FAQ />
       <Footer />
     </main>
   );

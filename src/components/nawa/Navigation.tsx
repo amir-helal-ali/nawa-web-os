@@ -15,11 +15,15 @@ const NAV_ITEMS = [
   { id: "performance", label: "الأداء", en: "Performance" },
   { id: "comparison", label: "المقارنة", en: "Comparison" },
   { id: "security", label: "الأمان", en: "Security" },
+  { id: "observability", label: "الرصد", en: "Observability" },
   { id: "marketplace", label: "الإضافات", en: "Plugins" },
+  { id: "dx", label: "تجربة المطور", en: "DX" },
   { id: "builder", label: "بناء التطبيقات", en: "App Builder" },
   { id: "cli", label: "CLI", en: "CLI" },
+  { id: "ecosystem", label: "المجتمع", en: "Community" },
   { id: "docker", label: "Docker", en: "Docker" },
   { id: "roadmap", label: "خارطة الطريق", en: "Roadmap" },
+  { id: "faq", label: "FAQ", en: "FAQ" },
 ];
 
 export function Navigation() {
@@ -61,7 +65,7 @@ export function Navigation() {
     <header
       className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${
         scrolled
-          ? "backdrop-blur-xl bg-background/75 border-b border-border/60"
+          ? "backdrop-blur-xl bg-background/80 border-b border-border/60"
           : "bg-transparent"
       }`}
     >
@@ -139,7 +143,7 @@ export function Navigation() {
           <motion.nav
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="xl:hidden pb-4 grid grid-cols-2 gap-1.5 max-h-[60vh] overflow-y-auto scrollbar-narrow"
+            className="xl:hidden pb-4 grid grid-cols-2 gap-1.5 max-h-[70vh] overflow-y-auto scrollbar-narrow"
           >
             {NAV_ITEMS.map((item) => (
               <button

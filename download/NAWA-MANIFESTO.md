@@ -209,3 +209,58 @@ TLS مفعَّل افتراضياً. Auth على كل endpoint. CSP strict. WASM
 
 *هذه الوثيقة هي العقد المرجعي للمشروع. أي تعارض بينها وبين قرارات لاحقة،
 هذه الوثيقة هي الفصل.*
+
+---
+
+## 9. ملحق المخرجات (Deliverables Index)
+
+تم بناء نموذج أولي حي يغطي الجوانب التالية (18 قسم تفاعلي):
+
+### 🎯 الأقسام التقنية الأساسية
+1. **Hero** — بيان ثوري + KPIs حية (RAM, rps, p99, DB latency)
+2. **Concept** — المشكلة vs الحل + manifesto strip
+3. **Request Flow** — تتبّع بصري متحرك لرحلة طلب HTTP (7 مراحل)
+4. **Architecture** — محركان تفاعليان (Backend + Frontend) مع dialogs
+5. **Zero-Copy Kernel** — محاكاة io_uring ring حية + كود Rust ملوّن
+6. **NAWA-DB Shell** — terminal حقيقي بأوامر PUT/GET/DEL/SCAN/COUNT
+7. **Code Playground** — محرّر Rust بـ 5 قوالب + محاكاة HTTP response
+
+### 📊 الأقسام التحليلية
+8. **Performance Lab** — رسوم streaming + جدول مقارنة 8 معايير
+9. **Stack Comparison** — NAWA vs 5 stacks (Node, Django, Rails, Go, Next.js)
+10. **Security Zero-Trust** — 8 طبقات حماية تفاعلية + threat model
+11. **Observability** — لوحة metrics حية + distributed trace viewer
+
+### 🛠️ الأقسام العملية
+12. **Plugin Marketplace** — 9 WASM plugins قابلة للتثبيت
+13. **Developer Experience** — 6 ميزات DX + workflow timeline
+14. **App Builder** — 6 قوالب جاهزة (select → preview → deploy)
+15. **CLI Simulator** — terminal بـ 8 أوامر + async output
+
+### 🌍 الأقسام المجتمعية
+16. **Ecosystem** — stats + resources + showcase + governance
+17. **Docker Deployment** — Dockerfile + docker-compose
+18. **Roadmap** — 5 مراحل + progress 28%
+19. **FAQ** — 10 أسئلة مفصّلة بـ 5 فئات
+
+### 📈 الإحصائيات النهائية للنموذج
+- **18+ قسم تفاعلي**
+- **18 رابط تنقّل**
+- **5 محاكيات حية**: DB Shell, CLI, Code Playground, Request Flow, io_uring Ring
+- **9 رسوم بيانية** حية (Recharts)
+- **9 WASM plugins** + **6 قوالب تطبيقات** + **5 قوالب كود Rust**
+- **10 أسئلة FAQ** مفصّلة
+- **ثنائي اللغة** (عربي + إنجليزي) مع دعم RTL
+- **0 errors** في الـ lint و runtime
+
+---
+
+## 10. خلاصة المبادئ (Final Summary)
+
+> **NAWA (نواة)** ليس إطار عمل — هو نظام تشغيل للويب.
+> ليس تحسيناً — هو إعادة تعريف.
+> ليس اختياراً — هو المستقبل.
+
+عشرة مبادئ. ثنائي واحد. حاوية واحدة. صفر تبعيات.
+
+— نواة · 2026
