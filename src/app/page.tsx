@@ -1,4 +1,5 @@
 import { Navigation } from "@/components/nawa/Navigation";
+import { ScrollProgress } from "@/components/nawa/ScrollProgress";
 import { Hero } from "@/components/nawa/Hero";
 import { Concept } from "@/components/nawa/Concept";
 import { RequestFlow } from "@/components/nawa/RequestFlow";
@@ -18,11 +19,13 @@ import { Ecosystem } from "@/components/nawa/Ecosystem";
 import { DockerDeployment } from "@/components/nawa/DockerDeployment";
 import { Roadmap } from "@/components/nawa/Roadmap";
 import { FAQ } from "@/components/nawa/FAQ";
+import { FinalCTA } from "@/components/nawa/FinalCTA";
 import { Footer } from "@/components/nawa/Footer";
 
 export default function Home() {
   return (
     <main className="relative min-h-screen flex flex-col bg-background overflow-x-hidden">
+      <ScrollProgress />
       <Navigation />
       <Hero />
       <Concept />
@@ -43,6 +46,7 @@ export default function Home() {
       <DockerDeployment />
       <Roadmap />
       <FAQ />
+      <FinalCTA />
       <Footer />
     </main>
   );

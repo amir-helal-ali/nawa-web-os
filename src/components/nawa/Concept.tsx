@@ -124,6 +124,112 @@ export function Concept() {
           </div>
         </div>
 
+        {/* Before/After comparison visual */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
+          className="mt-16 grid lg:grid-cols-2 gap-4"
+        >
+          {/* Before */}
+          <div className="p-6 rounded-2xl border border-destructive/30 bg-destructive/5">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-destructive" />
+              <span className="text-xs font-semibold text-destructive mono uppercase tracking-wide">
+                Before · Traditional Stack
+              </span>
+            </div>
+            <div className="space-y-2 mb-4">
+              {["Nginx (30MB)", "Node.js (80MB)", "PostgreSQL (200MB)", "Redis (50MB)", "Your App (?)", "5 Docker containers"].map((c) => (
+                <div
+                  key={c}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded bg-destructive/10 border border-destructive/20 text-xs mono"
+                >
+                  <span className="text-destructive">▣</span>
+                  <span className="text-foreground/80">{c}</span>
+                </div>
+              ))}
+            </div>
+            <div className="pt-3 border-t border-destructive/20 grid grid-cols-2 gap-2 text-center">
+              <div>
+                <div className="text-xl font-bold text-destructive mono">360MB</div>
+                <div className="text-[10px] text-muted-foreground ar">RAM مستخدمة</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-destructive mono">5</div>
+                <div className="text-[10px] text-muted-foreground ar">حاويات</div>
+              </div>
+            </div>
+          </div>
+
+          {/* After */}
+          <div className="p-6 rounded-2xl border border-primary/50 bg-primary/5 glow-amber">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-nawa-pulse" />
+              <span className="text-xs font-semibold text-primary mono uppercase tracking-wide">
+                After · NAWA
+              </span>
+            </div>
+            <div className="space-y-2 mb-4">
+              {[
+                "nawad binary (11MB) — HTTP/3 + Router + Kernel",
+                "NAWA-DB (built-in) — KV/Document + ACID",
+                "WASM runtime — sandboxed plugins",
+                "All in ONE container · ONE process",
+              ].map((c) => (
+                <div
+                  key={c}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded bg-primary/10 border border-primary/20 text-xs mono"
+                >
+                  <span className="text-primary">◆</span>
+                  <span className="text-foreground/90">{c}</span>
+                </div>
+              ))}
+            </div>
+            <div className="pt-3 border-t border-primary/20 grid grid-cols-2 gap-2 text-center">
+              <div>
+                <div className="text-xl font-bold text-primary mono">47MB</div>
+                <div className="text-[10px] text-muted-foreground ar">RAM مستخدمة</div>
+              </div>
+              <div>
+                <div className="text-xl font-bold text-primary mono">1</div>
+                <div className="text-[10px] text-muted-foreground ar">حاوية</div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Improvement summary */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3"
+        >
+          {[
+            { value: "7.6×", label: "أقل RAM", color: "primary" },
+            { value: "5×", label: "أقل حاويات", color: "accent" },
+            { value: "12×", label: "أسرع", color: "primary" },
+            { value: "0", label: "تبعيات خارجية", color: "accent" },
+          ].map((s, i) => (
+            <motion.div
+              key={s.label}
+              initial={{ opacity: 0, scale: 0.9 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.3, delay: i * 0.08 }}
+              className="text-center p-4 rounded-xl border border-border/60 bg-card/60"
+            >
+              <div className={`text-2xl font-bold mono ${s.color === "primary" ? "text-primary" : "text-accent"}`}>
+                {s.value}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1 ar">{s.label}</div>
+            </motion.div>
+          ))}
+        </motion.div>
+
         {/* Manifesto strip */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}

@@ -12,6 +12,7 @@ import {
   Terminal,
   Cpu as CpuIcon,
   Activity,
+  Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -215,6 +216,32 @@ export function Hero() {
                 <Terminal className="w-4 h-4 ml-1" />
                 <span className="ar">جرّب قاعدة البيانات</span>
               </Button>
+            </motion.div>
+
+            {/* Trust badges strip */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              className="mt-6 flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
+            >
+              <span className="ar">موثوق من:</span>
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/40">
+                <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                <span className="mono">12.4k stars</span>
+              </span>
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/40">
+                <ShieldCheck className="w-3 h-3 text-accent" />
+                <span className="ar">MIT + Apache 2.0</span>
+              </span>
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/40">
+                <Cpu className="w-3 h-3 text-primary" />
+                <span className="mono">100% Rust</span>
+              </span>
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/40">
+                <Feather className="w-3 h-3 text-accent" />
+                <span className="mono">14.8MB image</span>
+              </span>
             </motion.div>
 
             {/* KPI live grid */}
