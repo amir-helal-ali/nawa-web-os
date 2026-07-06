@@ -12,7 +12,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use metrics::Metrics;
 use nawa_db::{DbEngine, Value};
-use nawa_frontend::{html::*, island::Island, template::PageTemplate};
+use nawa_auth::{AuthConfig, AuthStore};
 use nawa_engine::{UnifiedEngine, EngineContext};
 use nawa_http::{HttpServer, Response, Router, StatusCode};
 use tracing_subscriber::EnvFilter;
@@ -87,6 +87,10 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
         nawa_wasm::Sandbox::default().map_err(|e| anyhow::anyhow!("sandbox init failed: {e}"))?,
     ));
     tracing::info!("WASM sandbox initialized — {} plugins", sandbox.lock().await.len());
+
+    // Initialize auth system.
+    let auth = Arc::new(AuthStore::new(db.clone(), AuthConfig::with_secret("nawad-secret-key")));
+    tracing::info!("Auth system initialized — {} users", auth.user_count());
 
     // Initialize io_uring pipeline.
     let uring_config = nawa_uring::PipelineConfig::default();
@@ -330,61 +334,161 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
         });
     }
 
-    // GET /ssr — SSR page rendered with nawa-frontend (Frontend Engine integration)
+    // ─── Auth Endpoints ───
+    // POST /auth/register
+    {
+        let auth = auth.clone();
+        router.post("/auth/register", move |req| {
+            let auth = auth.clone();
+            async move {
+                let body = req.body_str();
+                let json: serde_json::Value = match serde_json::from_str(body) {
+                    Ok(v) => v,
+                    Err(_) => return Response::text("invalid JSON"),
+                };
+                let username = json["username"].as_str().unwrap_or("");
+                let email = json["email"].as_str().unwrap_or("");
+                let password = json["password"].as_str().unwrap_or("");
+                match auth.register(username, email, password) {
+                    Ok(result) => Response::json(&serde_json::json!({
+                        "status": "ok",
+                        "user": {
+                            "id": result.user.id,
+                            "username": result.user.username,
+                            "role": result.user.role,
+                            "verified": result.user.verified
+                        },
+                        "token": result.token,
+                        "expires_in": result.expires_in
+                    })),
+                    Err(e) => {
+                        let mut r = Response::new(StatusCode(400));
+                        r.header("Content-Type", "application/json");
+                        r.body = serde_json::to_vec(&serde_json::json!({"error": e.to_string()})).unwrap_or_default();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    // POST /auth/login
+    {
+        let auth = auth.clone();
+        router.post("/auth/login", move |req| {
+            let auth = auth.clone();
+            async move {
+                let body = req.body_str();
+                let json: serde_json::Value = match serde_json::from_str(body) {
+                    Ok(v) => v,
+                    Err(_) => return Response::text("invalid JSON"),
+                };
+                let email = json["email"].as_str().unwrap_or("");
+                let password = json["password"].as_str().unwrap_or("");
+                match auth.login(email, password) {
+                    Ok(result) => Response::json(&serde_json::json!({
+                        "status": "ok",
+                        "user": {
+                            "id": result.user.id,
+                            "username": result.user.username,
+                            "role": result.user.role
+                        },
+                        "token": result.token,
+                        "expires_in": result.expires_in
+                    })),
+                    Err(e) => {
+                        let mut r = Response::new(StatusCode(401));
+                        r.header("Content-Type", "application/json");
+                        r.body = serde_json::to_vec(&serde_json::json!({"error": e.to_string()})).unwrap_or_default();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    // GET /auth/me (requires token in Authorization header)
+    {
+        let auth = auth.clone();
+        router.get("/auth/me", move |req| {
+            let auth = auth.clone();
+            async move {
+                let token = req.header("authorization")
+                    .and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()))
+                    .or_else(|| req.header("authorization").map(|s| s.to_string()));
+                match token {
+                    Some(t) => match auth.verify_token(&t) {
+                        Ok(claims) => match auth.get_user(&claims.sub) {
+                            Ok(user) => Response::json(&serde_json::json!({
+                                "id": user.id,
+                                "username": user.username,
+                                "email": user.email,
+                                "role": user.role,
+                                "verified": user.verified
+                            })),
+                            Err(e) => Response::text(e.to_string()),
+                        },
+                        Err(e) => {
+                            let mut r = Response::new(StatusCode(401));
+                            r.body = e.to_string().into_bytes();
+                            r
+                        }
+                    },
+                    None => {
+                        let mut r = Response::new(StatusCode(401));
+                        r.body = b"missing token".to_vec();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    // GET /auth/users (admin only)
+    {
+        let auth = auth.clone();
+        router.get("/auth/users", move |req| {
+            let auth = auth.clone();
+            async move {
+                let token = req.header("authorization")
+                    .and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()))
+                    .or_else(|| req.header("authorization").map(|s| s.to_string()));
+                match token.and_then(|t| auth.verify_token(&t).ok()) {
+                    Some(claims) => match auth.get_user(&claims.sub) {
+                        Ok(user) if user.role == "admin" => {
+                            let users = auth.list_users().unwrap_or_default();
+                            let safe: Vec<_> = users.iter().map(|u| serde_json::json!({
+                                "id": u.id, "username": u.username,
+                                "email": u.email, "role": u.role, "verified": u.verified
+                            })).collect();
+                            Response::json(&serde_json::json!({"users": safe, "count": safe.len()}))
+                        }
+                        _ => {
+                            let mut r = Response::new(StatusCode(403));
+                            r.body = b"admin required".to_vec();
+                            r
+                        }
+                    },
+                    None => {
+                        let mut r = Response::new(StatusCode(401));
+                        r.body = b"missing token".to_vec();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    // GET /ssr — Unified Engine SSR (uses nawa-engine, the unified pipeline)
     {
         let db = db.clone();
         router.get("/ssr", move |_| {
             let db = db.clone();
             async move {
-                // Fetch data from NAWA-DB (Backend Engine).
-                let entries = db.scan_prefix("", 100);
-
-                // Build SSR page with nawa-frontend (Frontend Engine).
-                let mut template = PageTemplate::new("NAWA", "SSR Demo")
-                    .css(nawa_frontend::template::default_css())
-                    .nav_item("Home", "/")
-                    .nav_item("SSR", "/ssr")
-                    .nav_item("Health", "/health")
-                    .nav_item("Metrics", "/metrics")
-                    .content(h1().text("🦀 NAWA SSR — Frontend Engine"))
-                    .content(p().text("هذه الصفحة مُصيَّرة بـ nawa-frontend — محرك الواجهة الحقيقي."));
-
-                // List DB entries as HTML.
-                if entries.is_empty() {
-                    template = template.content(p().text("لا توجد بيانات. استخدم POST /:key لإضافة."));
-                } else {
-                    let mut table_el = table();
-                    table_el = table_el.child(
-                        tr().child(th().text("Key")).child(th().text("Value"))
-                    );
-                    for (k, v) in &entries {
-                        let key_str = String::from_utf8_lossy(k);
-                        let val_str = v.display();
-                        let display_val: String = val_str.chars().take(60).collect();
-                        table_el = table_el.child(
-                            tr()
-                                .child(td().text(key_str.to_string()))
-                                .child(td().text(display_val))
-                        );
-                    }
-                    template = template.content(table_el);
-                }
-
-                // Add an interactive island (counter).
-                let counter_island = Island::new("counter", "Counter")
-                    .props(serde_json::json!({"initial": 0}))
-                    .content(
-                        div().class("island-demo")
-                            .child(h2().text("Interactive Island (Counter)"))
-                            .child(p().text("Count: 0"))
-                            .child(button().text("+1"))
-                    );
-                template = template.island(counter_island);
-
-                // Render complete HTML.
-                let html = template.render();
-                let mut resp = Response::text(html);
-                resp.header("Content-Type", "text/html; charset=utf-8");
+                let ctx = EngineContext::new(db);
+                let result = UnifiedEngine::render_db_page(&ctx, "NAWA SSR");
+                let mut resp = Response::text(String::from_utf8_lossy(&result.html).to_string());
+                resp.header("Content-Type", result.content_type);
                 resp
             }
         });

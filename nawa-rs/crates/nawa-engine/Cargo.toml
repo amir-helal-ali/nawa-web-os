@@ -6,10 +6,7 @@ license.workspace = true
 description = "NAWA Unified Engine — zero-copy DB→SSR→HTTP pipeline + built-in UI system"
 
 [dependencies]
-nawa-kernel = { path = "../nawa-kernel" }
 nawa-db = { path = "../nawa-db" }
-nawa-frontend = { path = "../nawa-frontend" }
-nawa-uring = { path = "../nawa-uring" }
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
