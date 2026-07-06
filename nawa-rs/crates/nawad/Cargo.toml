@@ -13,6 +13,7 @@ path = "src/main.rs"
 nawa-kernel = { path = "../nawa-kernel" }
 nawa-db = { path = "../nawa-db" }
 nawa-http = { path = "../nawa-http" }
+nawa-uring = { path = "../nawa-uring" }
 nawa-wasm = { path = "../nawa-wasm" }
 tokio.workspace = true
 anyhow.workspace = true

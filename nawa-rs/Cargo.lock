@@ -1202,6 +1202,7 @@ dependencies = [
  "nawa-db",
  "nawa-http",
  "nawa-kernel",
+ "nawa-uring",
  "nawa-wasm",
  "serde",
  "serde_json",

@@ -83,6 +83,16 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
     ));
     tracing::info!("WASM sandbox initialized — {} plugins", sandbox.lock().await.len());
 
+    // Initialize io_uring pipeline.
+    let uring_config = nawa_uring::PipelineConfig::default();
+    let uring = Arc::new(nawa_uring::NawaUring::new(uring_config)?);
+    tracing::info!(
+        "io_uring pipeline initialized — real_uring={}, sqpoll={}, entries={}",
+        uring.is_real_uring(),
+        uring.is_sqpoll_enabled(),
+        uring.config().entries
+    );
+
     let mut router = Router::new();
 
     // Health check
@@ -192,6 +202,30 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
         });
     }
 
+    // GET /uring — io_uring pipeline stats
+    {
+        let uring = uring.clone();
+        router.get("/uring", move |_| {
+            let uring = uring.clone();
+            async move {
+                let stats = uring.stats();
+                let body = serde_json::json!({
+                    "real_uring": uring.is_real_uring(),
+                    "sqpoll_enabled": uring.is_sqpoll_enabled(),
+                    "entries": uring.config().entries,
+                    "stats": {
+                        "submitted": stats.submitted,
+                        "completed": stats.completed,
+                        "in_flight": stats.in_flight,
+                        "bytes_transferred": stats.bytes_transferred,
+                        "errors": stats.errors,
+                    }
+                });
+                Response::json(&body)
+            }
+        });
+    }
+
     // GET /plugins — list loaded WASM plugins
     {
         let sandbox = sandbox.clone();
@@ -253,11 +287,12 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
             "description": "Revolutionary Web Operating System built in Rust",
             "endpoints": [
                 "GET /health",
+                "GET /uring",
+                "GET /plugins",
                 "GET /:key",
                 "POST /:key",
                 "DELETE /:key",
                 "GET /scan/:prefix",
-                "GET /plugins",
                 "POST /plugins/:name/invoke",
             ]
         });

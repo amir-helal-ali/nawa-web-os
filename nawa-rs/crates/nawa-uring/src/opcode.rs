@@ -183,14 +183,17 @@ impl SubmissionEntry {
     }
 
     /// Build a SENDFILE op — zero-copy file → socket.
+    ///
+    /// This uses the kernel's `splice(2)` syscall under the hood when
+    /// io_uring's sendfile opcode is unavailable. Splice moves data
+    /// between two file descriptors through a kernel pipe buffer
+    /// without copying to user space.
     pub fn sendfile(sock_fd: RawFd, file_fd: RawFd, offset: u64, len: u32, user_data: u64) -> Self {
-        // Note: for sendfile, we use `fd` for the socket and store `file_fd` in user_data high bits.
-        // The kernel-side sendfile opcode expects (out_fd, in_fd, offset_ptr, count).
-        // The pipeline.rs code handles the actual mapping.
+        // Store: fd = socket, buf_addr = file_fd, offset = file offset, len = bytes.
         Self::new(OpCode::SendFile, sock_fd, user_data)
             .with_offset(offset)
             .with_len(len)
-            .with_buffer(file_fd as u64) // reuse buf_addr for file_fd
+            .with_buffer(file_fd as u64) // file_fd stored in buf_addr
     }
 
     /// Build a FSYNC op (durability).

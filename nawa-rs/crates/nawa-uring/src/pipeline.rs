@@ -133,6 +133,8 @@ pub struct NawaUring {
     config: PipelineConfig,
     stats: Arc<PipelineStats>,
     inner: Inner,
+    /// Background drain task handle (if spawned).
+    drain_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 enum Inner {
@@ -154,6 +156,7 @@ impl NawaUring {
                     config,
                     stats,
                     inner: Inner::Linux(inner),
+                    drain_handle: None,
                 });
             }
         }
@@ -164,6 +167,7 @@ impl NawaUring {
             config,
             stats,
             inner: Inner::Fallback(inner),
+            drain_handle: None,
         })
     }
 
@@ -175,6 +179,32 @@ impl NawaUring {
     /// Create a high-throughput pipeline.
     pub fn high_throughput() -> Result<Self> {
         Self::new(PipelineConfig::high_throughput())
+    }
+
+    /// Spawn a background task that continuously drains the CQ.
+    ///
+    /// This is essential for high-throughput scenarios where you don't
+    /// want to drain after every submit. The task runs until the pipeline
+    /// is dropped.
+    pub fn spawn_background_drain(&mut self) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            if let Inner::Linux(ref inner) = self.inner {
+                let inner_clone = inner.clone_ref();
+                let handle = tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_micros(100));
+                    loop {
+                        interval.tick().await;
+                        inner_clone.drain_completions();
+                    }
+                });
+                self.drain_handle = Some(handle);
+                return Ok(());
+            }
+        }
+        Err(UringError::Setup(
+            "background drain only supported on Linux with real io_uring".into(),
+        ))
     }
 
     /// Submit an operation and wait for its completion asynchronously.
@@ -192,6 +222,15 @@ impl NawaUring {
             #[cfg(target_os = "linux")]
             Inner::Linux(inner) => inner.submit_batch(entries).await,
             Inner::Fallback(inner) => inner.submit_batch(entries).await,
+        }
+    }
+
+    /// Manually drain completions (only needed if no background task is running).
+    pub fn drain_completions(&self) {
+        match &self.inner {
+            #[cfg(target_os = "linux")]
+            Inner::Linux(inner) => inner.drain_completions(),
+            Inner::Fallback(_) => {} // fallback drains automatically
         }
     }
 
@@ -214,6 +253,19 @@ impl NawaUring {
     pub fn is_real_uring(&self) -> bool {
         matches!(self.inner, Inner::Linux(_))
     }
+
+    /// Is SQPOLL mode enabled?
+    pub fn is_sqpoll_enabled(&self) -> bool {
+        self.config.sqpoll.is_some()
+    }
+}
+
+impl Drop for NawaUring {
+    fn drop(&mut self) {
+        if let Some(handle) = self.drain_handle.take() {
+            handle.abort();
+        }
+    }
 }
 
 // ============================================================================
@@ -229,25 +281,56 @@ mod linux_impl {
     use tokio::sync::oneshot;
 
     pub struct LinuxUring {
-        ring: Mutex<IoUring>,
-        pending: Mutex<HashMap<u64, (oneshot::Sender<CompletionEvent>, Instant, OpCode)>>,
-        next_user_data: AtomicU64,
+        ring: Arc<Mutex<IoUring>>,
+        pending: Arc<Mutex<HashMap<u64, (oneshot::Sender<CompletionEvent>, Instant, OpCode)>>>,
+        next_user_data: Arc<AtomicU64>,
         stats: Arc<PipelineStats>,
         config: PipelineConfig,
     }
 
+    // SAFETY: All fields are Arc/Mutex — safe to send across threads.
+    unsafe impl Send for LinuxUring {}
+    unsafe impl Sync for LinuxUring {}
+
     impl LinuxUring {
+        /// Create a cheap clone for sharing across tasks.
+        pub fn clone_ref(&self) -> Self {
+            Self {
+                ring: self.ring.clone(),
+                pending: self.pending.clone(),
+                next_user_data: self.next_user_data.clone(),
+                stats: self.stats.clone(),
+                config: self.config.clone(),
+            }
+        }
         pub fn new(config: PipelineConfig, stats: Arc<PipelineStats>) -> Result<Self> {
             // Use the io-uring crate's builder API.
-            // Note: io-uring 0.7 Builder uses `.entries(n)` instead of `.setup_entries(n)`.
-            let ring = IoUring::builder()
-                .build(config.entries)
-                .map_err(|e| UringError::Setup(e.to_string()))?;
+            // Enable SQPOLL if configured (kernel-side polling — eliminates syscalls).
+            // Note: io-uring 0.7 Builder uses builder pattern — chain methods.
+            let ring = if let Some(sqpoll) = &config.sqpoll {
+                if config.iopoll {
+                    io_uring::IoUring::builder()
+                        .setup_sqpoll(sqpoll.idle_timeout_ms)
+                        .setup_iopoll()
+                        .build(config.entries)
+                } else {
+                    io_uring::IoUring::builder()
+                        .setup_sqpoll(sqpoll.idle_timeout_ms)
+                        .build(config.entries)
+                }
+            } else if config.iopoll {
+                io_uring::IoUring::builder()
+                    .setup_iopoll()
+                    .build(config.entries)
+            } else {
+                io_uring::IoUring::builder().build(config.entries)
+            }
+            .map_err(|e| UringError::Setup(e.to_string()))?;
 
             Ok(Self {
-                ring: Mutex::new(ring),
-                pending: Mutex::new(HashMap::new()),
-                next_user_data: AtomicU64::new(1),
+                ring: Arc::new(Mutex::new(ring)),
+                pending: Arc::new(Mutex::new(HashMap::new())),
+                next_user_data: Arc::new(AtomicU64::new(1)),
                 stats,
                 config,
             })
@@ -368,10 +451,15 @@ mod linux_impl {
                     .build(),
                 OpCode::Send => opcode::Send::new(fd, entry.buf_addr as *const _, entry.len).build(),
                 OpCode::Recv => opcode::Recv::new(fd, entry.buf_addr as *mut _, entry.len).build(),
+                OpCode::SendFile => {
+                    // Zero-copy file → socket via splice(2).
+                    // entry.fd = socket (out_fd), entry.buf_addr = file_fd (in_fd),
+                    // entry.offset = file offset, entry.len = bytes to send.
+                    let in_fd = types::Fd(entry.buf_addr as i32);
+                    opcode::Splice::new(in_fd, entry.offset as _, fd, -1i64 as _, entry.len)
+                        .build()
+                }
                 OpCode::Accept => {
-                    // Accept requires (fd, sockaddr_ptr, addrlen_ptr).
-                    // We pass null pointers — the kernel will not fill in the peer address,
-                    // but the connection is still accepted.
                     opcode::Accept::new(fd, std::ptr::null_mut(), std::ptr::null_mut()).build()
                 }
                 OpCode::Close => opcode::Close::new(fd).build(),
@@ -388,7 +476,7 @@ mod linux_impl {
         }
 
         /// Drain completions from the CQ and notify waiters.
-        fn drain_completions(&self) {
+        pub fn drain_completions(&self) {
             let mut ring = self.ring.lock().unwrap();
             let mut pending = self.pending.lock().unwrap();
 
