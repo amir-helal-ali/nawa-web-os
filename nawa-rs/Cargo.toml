@@ -7,6 +7,7 @@ members = [
     "crates/nawa-uring",
     "crates/nawa-wasm",
     "crates/nawad",
+    "crates/nawa-cli",
 ]
 
 [workspace.package]
@@ -61,6 +62,8 @@ bytes-utils = "0.1"
 # io_uring (Linux 5.1+)
 io-uring = "0.7"
 libc = "0.2"
+# Metrics (Prometheus format)
+prometheus = "0.13"
 
 [profile.release]
 opt-level = 3

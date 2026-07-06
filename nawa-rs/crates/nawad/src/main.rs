@@ -3,11 +3,14 @@
 //! The single binary that runs the entire NAWA system:
 //! HTTP server + NAWA-DB + zero-copy kernel.
 
+mod metrics;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
+use metrics::Metrics;
 use nawa_db::{DbEngine, Value};
 use nawa_http::{HttpServer, Response, Router, StatusCode};
 use tracing_subscriber::EnvFilter;
@@ -92,6 +95,10 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
         uring.is_sqpoll_enabled(),
         uring.config().entries
     );
+
+    // Initialize Prometheus metrics.
+    let metrics = Arc::new(Metrics::new());
+    tracing::info!("Prometheus metrics initialized — /metrics endpoint");
 
     let mut router = Router::new();
 
@@ -226,6 +233,33 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
         });
     }
 
+    // GET /metrics — Prometheus metrics endpoint
+    {
+        let metrics = metrics.clone();
+        let db = db.clone();
+        let uring = uring.clone();
+        router.get("/metrics", move |_| {
+            let metrics = metrics.clone();
+            let db = db.clone();
+            let uring = uring.clone();
+            async move {
+                // Update gauges from current state.
+                let db_stats = db.stats();
+                metrics.update_db_stats(&db_stats);
+                metrics.update_db_gauges(db.len(), db.memtable_size());
+
+                let uring_stats = uring.stats();
+                metrics.update_uring_stats(&uring_stats);
+
+                // Render in Prometheus text format.
+                let body = metrics.render();
+                let mut resp = Response::text(body);
+                resp.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+                resp
+            }
+        });
+    }
+
     // GET /plugins — list loaded WASM plugins
     {
         let sandbox = sandbox.clone();
@@ -288,6 +322,7 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
             "endpoints": [
                 "GET /health",
                 "GET /uring",
+                "GET /metrics",
                 "GET /plugins",
                 "GET /:key",
                 "POST /:key",

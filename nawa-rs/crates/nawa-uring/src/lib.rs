@@ -60,7 +60,7 @@ pub mod registered;
 pub mod sqpoll;
 
 pub use opcode::{OpCode, SubmissionEntry};
-pub use pipeline::{CompletionEvent, NawaUring, PipelineConfig};
+pub use pipeline::{CompletionEvent, NawaUring, PipelineConfig, PipelineStats, PipelineStatsSnapshot};
 pub use registered::{RegisteredBuffer, RegisteredBuffers};
 pub use sqpoll::SqPollConfig;
 
