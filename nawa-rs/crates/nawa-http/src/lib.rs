@@ -3,13 +3,14 @@
 //! HTTP/1.1 + HTTP/3 server with a type-safe router.
 
 pub mod acme;
+#[cfg(feature = "http3")]
 pub mod h3;
 pub mod router;
 pub mod server;
 pub mod tls;
 
 pub use acme::{AcmeClient, AcmeConfig, AcmeError};
-pub use h3::{Http3Config, Http3Error, Http3Server};
+// h3 exports are behind the "http3" feature
 pub use router::{Handler, Method, Request, Response, Router, StatusCode};
 pub use server::HttpServer;
 pub use tls::{TlsConfig, TlsError};
