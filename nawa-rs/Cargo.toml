@@ -44,6 +44,10 @@ memmap2 = "0.9"
 clap = { version = "4.5", features = ["derive"] }
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+# TLS (for HTTPS — Phase 4)
+rustls = "0.23"
+rustls-pemfile = "2.2"
+tokio-rustls = "0.26"
 
 [profile.release]
 opt-level = 3

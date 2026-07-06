@@ -26,14 +26,18 @@
 //! ```
 
 pub mod bloom;
+pub mod compaction;
 pub mod engine;
 pub mod memtable;
+pub mod skip_list;
 pub mod sstable;
 pub mod wal;
 
 pub use bloom::BloomFilter;
+pub use compaction::Compactor;
 pub use engine::{DbConfig, DbEngine, DbError, DbResult, DbStats, StatsSnapshot};
 pub use memtable::MemTable;
+pub use skip_list::SkipList;
 pub use sstable::SSTableWriter;
 pub use wal::WriteAheadLog;
 

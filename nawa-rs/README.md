@@ -60,16 +60,17 @@ curl http://localhost:8080/health
 ## 📊 الأداء (مقاسة على هذا الـ build)
 
 ```
-NAWA-DB benchmark — 100000 operations
+NAWA-DB benchmark — 50000 operations
 ─────────────────────────────────────
-PUT:    100000 ops in 216.86ms  →    461,131 ops/sec
-GET:    100000 ops in  20.16ms  →  4,960,788 ops/sec  (100000 hits)
-SCAN:   100000 hits in  38.62ms  →  2,589,080 ops/sec
+PUT:     50000 ops in 104.11ms  →    480,257 ops/sec
+GET:     50000 ops in   8.61ms  →  5,807,128 ops/sec  (50000 hits)
+SCAN:    50000 hits in  17.44ms  →  2,866,245 ops/sec
 ```
 
-- **Binary size**: 1.6 MB (مقارنة بـ 250MB لـ Node.js)
+- **Binary size**: 1.7 MB (مقارنة بـ 250MB لـ Node.js)
 - **Cold start**: < 50ms
 - **No external dependencies** — كل شيء في Rust
+- **64 اختبار ناجح** عبر 4 crates
 
 ---
 
@@ -129,18 +130,32 @@ curl -X DELETE http://localhost:8080/user:1001
 ### nawa-db
 - `bloom.rs` — probabilistic bloom filter (xxh3 double-hash)
 - `memtable.rs` — in-memory sorted table (BTreeMap + RwLock)
+- `skip_list.rs` — lock-free skip-list (with random levels)
 - `wal.rs` — write-ahead log for durability
 - `sstable.rs` — immutable on-disk sorted table
+- `compaction.rs` — merges SSTables to reclaim space
 - `engine.rs` — ties everything together + auto-flush + stats
 
 ### nawa-http
 - `router.rs` — type-safe routing with `:params` and `*wildcards`
 - `server.rs` — HTTP/1.1 over TCP, keep-alive, response timing
+- `tls.rs` — rustls-based TLS support (HTTPS)
 
 ### nawad
 - CLI: `serve`, `benchmark`, `info`
 - REST handlers for DB ops
 - Stats endpoint
+
+---
+
+## 🔬 Benchmarks
+
+Run criterion benchmarks with:
+```bash
+cargo bench -p nawa-db
+```
+
+Generates HTML reports in `target/criterion/`.
 
 ---
 
