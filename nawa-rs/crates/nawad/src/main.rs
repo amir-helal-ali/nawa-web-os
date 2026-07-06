@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use metrics::Metrics;
 use nawa_db::{DbEngine, Value};
 use nawa_frontend::{html::*, island::Island, template::PageTemplate};
+use nawa_engine::{UnifiedEngine, EngineContext};
 use nawa_http::{HttpServer, Response, Router, StatusCode};
 use tracing_subscriber::EnvFilter;
 
@@ -310,6 +311,21 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
                         r
                     }
                 }
+            }
+        });
+    }
+
+    // GET /unified — Unified Engine: DB → ZeroCopyHtml → response (true zero-copy)
+    {
+        let db = db.clone();
+        router.get("/unified", move |_| {
+            let db = db.clone();
+            async move {
+                let ctx = EngineContext::new(db);
+                let result = UnifiedEngine::render_db_page(&ctx, "NAWA Unified Engine");
+                let mut resp = Response::text(String::from_utf8_lossy(&result.html).to_string());
+                resp.header("Content-Type", result.content_type);
+                resp
             }
         });
     }

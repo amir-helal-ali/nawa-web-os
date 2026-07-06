@@ -1448,6 +1448,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nawa-engine"
+version = "0.1.0-alpha"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "nawa-db",
+ "nawa-frontend",
+ "nawa-kernel",
+ "nawa-uring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nawa-frontend"
 version = "0.1.0-alpha"
 dependencies = [
@@ -1541,6 +1560,7 @@ dependencies = [
  "clap",
  "nawa-auth",
  "nawa-db",
+ "nawa-engine",
  "nawa-frontend",
  "nawa-http",
  "nawa-kernel",
