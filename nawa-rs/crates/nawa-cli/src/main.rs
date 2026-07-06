@@ -83,6 +83,21 @@ enum Commands {
         ops: u32,
     },
 
+    /// Run tests for the NAWA workspace.
+    Test {
+        /// Run only the specified crate's tests.
+        #[arg(short, long)]
+        crate_name: Option<String>,
+
+        /// Run benchmarks instead of tests.
+        #[arg(short, long)]
+        bench: bool,
+
+        /// Show test output.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
     /// Show version and component info.
     Info,
 
@@ -122,6 +137,11 @@ fn main() -> anyhow::Result<()> {
             remote_data_dir,
         } => deploy(&target, &remote_data_dir),
         Commands::Benchmark { ops } => benchmark(ops),
+        Commands::Test {
+            crate_name,
+            bench,
+            verbose,
+        } => run_tests(&crate_name, bench, verbose),
         Commands::Info => {
             print_info();
             Ok(())
@@ -554,6 +574,49 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
             anyhow::bail!("nawad not found")
         }
     }
+}
+
+fn run_tests(
+    crate_name: &Option<String>,
+    bench: bool,
+    verbose: bool,
+) -> anyhow::Result<()> {
+    println!("🧪 Running NAWA tests...\n");
+
+    let mut cmd = Command::new("cargo");
+    if bench {
+        cmd.arg("bench");
+    } else {
+        cmd.arg("test");
+    }
+
+    if let Some(name) = crate_name {
+        cmd.arg("-p").arg(name);
+    } else {
+        cmd.arg("--workspace");
+    }
+
+    if verbose {
+        cmd.arg("--verbose");
+    }
+
+    cmd.arg("--release");
+
+    println!("$ cargo {:?} {} {} {}",
+        if bench { "bench" } else { "test" },
+        if let Some(n) = crate_name { format!("-p {n}") } else { "--workspace".into() },
+        if verbose { "--verbose" } else { "" },
+        "--release"
+    );
+    println!();
+
+    let status = cmd.status()?;
+    if !status.success() {
+        anyhow::bail!("tests failed with status: {status}");
+    }
+
+    println!("\n✓ All tests passed!");
+    Ok(())
 }
 
 fn print_info() {
