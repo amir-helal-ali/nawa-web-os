@@ -1,0 +1,26 @@
+[package]
+name = "nawa-uring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA io_uring bindings — zero-copy async I/O on Linux 5.1+"
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+libc.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "uring_ops"
+harness = false
+path = "benches/uring_ops.rs"

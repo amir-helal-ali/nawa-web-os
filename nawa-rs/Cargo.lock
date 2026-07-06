@@ -893,6 +893,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-uring"
+version = "0.7.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9080b15e63775b9a2ac7dca720f7050a8b955e092ea0f6020a4a80f69998cdc0"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "is-terminal"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1143,6 +1154,21 @@ dependencies = [
  "bytes",
  "crossbeam",
  "memmap2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nawa-uring"
+version = "0.1.0-alpha"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "criterion",
+ "io-uring",
+ "libc",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1492,7 +1518,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@ members = [
     "crates/nawa-kernel",
     "crates/nawa-db",
     "crates/nawa-http",
+    "crates/nawa-uring",
     "crates/nawa-wasm",
     "crates/nawad",
 ]
@@ -57,6 +58,9 @@ h3 = "0.0.6"
 h3-quinn = "0.0.7"
 http = "1.1"
 bytes-utils = "0.1"
+# io_uring (Linux 5.1+)
+io-uring = "0.7"
+libc = "0.2"
 
 [profile.release]
 opt-level = 3
