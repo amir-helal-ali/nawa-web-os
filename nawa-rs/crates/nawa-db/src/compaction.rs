@@ -63,7 +63,7 @@ impl Compactor {
             .sum();
 
         // Read all entries from all SSTables, newest file wins on conflict.
-        let mut merged: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
+        let merged: BTreeMap<Vec<u8>, Value> = BTreeMap::new();
         let mut total_dropped = 0usize;
 
         for input in &inputs {

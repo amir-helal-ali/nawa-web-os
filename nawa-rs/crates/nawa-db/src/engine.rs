@@ -46,6 +46,8 @@ pub struct DbEngine {
     config: DbConfig,
     memtable: Arc<MemTable>,
     wal: Arc<WriteAheadLog>,
+    /// Sequence number counter (for future use in MVCC).
+    #[allow(dead_code)]
     seq: std::sync::atomic::AtomicU64,
     stats: Arc<DbStats>,
 }

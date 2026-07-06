@@ -3,7 +3,6 @@
 //! Used to skip SSTable reads when the key is definitely not present.
 //! False positive rate is configurable; false negatives are impossible.
 
-use std::hash::Hasher;
 use xxhash_rust::xxh3::Xxh3;
 
 /// A bloom filter for fast key-existence checks.

@@ -210,7 +210,7 @@ fn route(
                     ("200 OK".into(), "text/html; charset=utf-8".into(),
                         render_settings(user, auth), None)
                 }
-                Some(_) => ("200 OK".into(), "text/html; charset=utf-8".into(),
+                Some(_) => ("403 Forbidden".into(), "text/html; charset=utf-8".into(),
                     render_error("صلاحية الأدمن مطلوبة", "/dashboard"), None),
                 None => redirect("/login"),
             }
@@ -376,7 +376,7 @@ fn render_dashboard(user: &nawa_auth::User, auth: &AuthStore) -> String {
         total = auth.user_count())
 }
 
-fn render_settings(user: &nawa_auth::User, auth: &AuthStore) -> String {
+fn render_settings(_user: &nawa_auth::User, auth: &AuthStore) -> String {
     let settings = auth.get_settings().unwrap_or_default();
     format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>الإعدادات — NAWA Auth</title><style>{STYLES}</style></head><body><div class="container"><div class="nav"><a href="/dashboard" class="nav-brand">← العودة</a><span>الإعدادات</span></div><div class="card"><h2>⚙ إعدادات المشروع</h2><form method="POST" action="/settings"><label>اسم المشروع</label><input type="text" name="project_name" value="{project_name}"><label><input type="checkbox" name="registration_open" {reg_open}> التسجيل مفتوح</label><label><input type="checkbox" name="verification_required" {ver_req}> التوثيق إلزامي</label><label>الحد الأقصى للمستخدمين (فارغ = بلا حد)</label><input type="number" name="max_users" value="{max_users}"><label>مدة صلاحية JWT (بالثواني)</label><input type="number" name="jwt_expiry_secs" value="{jwt_expiry}"><button type="submit" class="btn btn-primary">حفظ الإعدادات</button></form></div></div></body></html>"#,
         project_name = settings.project_name,

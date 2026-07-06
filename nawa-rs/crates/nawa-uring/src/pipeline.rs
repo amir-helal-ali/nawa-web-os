@@ -7,7 +7,6 @@
 use crate::opcode::{OpCode, SubmissionEntry};
 use crate::sqpoll::SqPollConfig;
 use crate::{Result, UringError};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

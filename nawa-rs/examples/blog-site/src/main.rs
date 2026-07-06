@@ -4,8 +4,6 @@
 //! Features: Create/list/get/delete posts, HTML pages, JSON API, stats.
 
 use nawa_db::{DbEngine, Value};
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

@@ -26,11 +26,15 @@ pub struct Metrics {
     pub uring_errors: IntCounter,
 
     // HTTP metrics
+    #[allow(dead_code)]
     pub http_requests: IntCounter,
+    #[allow(dead_code)]
     pub http_errors: IntCounter,
 
     // WASM metrics
+    #[allow(dead_code)]
     pub wasm_plugins_loaded: IntGauge,
+    #[allow(dead_code)]
     pub wasm_invocations: IntCounter,
 }
 
@@ -134,6 +138,7 @@ impl Default for Metrics {
     }
 }
 
+#[allow(dead_code)]
 pub type SharedMetrics = Arc<Metrics>;
 
 #[cfg(test)]

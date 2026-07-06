@@ -59,6 +59,7 @@ impl RegisteredBuffer {
     }
 
     /// Mark as registered with the given index (internal use).
+    #[allow(dead_code)]
     pub(crate) fn set_index(&mut self, index: u32) {
         self.index = Some(index);
     }
@@ -133,6 +134,7 @@ impl RegisteredBuffers {
     }
 
     /// Mark all buffers as registered (internal use).
+    #[allow(dead_code)]
     pub(crate) fn mark_registered(&mut self) {
         for (i, buf) in self.buffers.iter().enumerate() {
             if let Ok(mut guard) = buf.lock() {

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use crate::{bloom::BloomFilter, Value};
 
 /// SSTable header (written at the start of the file).
+#[allow(dead_code)]
 #[derive(Debug)]
 struct SSTableHeader {
     num_entries: u32,
@@ -91,6 +92,7 @@ impl SSTableWriter {
 
 /// SSTable reader — opens an existing SSTable for reads.
 pub struct SSTableReader {
+    #[allow(dead_code)]
     path: PathBuf,
     data: Vec<u8>,
     num_entries: u32,

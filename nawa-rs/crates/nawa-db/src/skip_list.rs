@@ -9,29 +9,31 @@
 //! Levels are chosen randomly with p=0.5 geometric distribution.
 //! Search starts at the top level and walks down.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering as AtomicOrd};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrd};
 
 /// Max height of the skip-list tower.
+#[allow(dead_code)]
 const MAX_LEVEL: usize = 32;
 /// Probability of promoting to the next level (p=0.5 → classic skip-list).
+#[allow(dead_code)]
 const P_LEVEL: f64 = 0.5;
 
-/// A node in the skip-list.
+/// A node in the skip-list (for future lock-free implementation).
+#[allow(dead_code)]
 struct Node<K, V> {
     key: K,
     value: V,
     /// Next pointers at each level. Length = node height.
-    next: Vec<AtomicPtr<Node<K, V>>>,
+    next: Vec<std::sync::atomic::AtomicPtr<Node<K, V>>>,
 }
 
 impl<K, V> Node<K, V> {
+    #[allow(dead_code)]
     fn new(key: K, value: V, height: usize) -> Box<Self> {
         let mut next = Vec::with_capacity(height);
         for _ in 0..height {
-            next.push(AtomicPtr::new(std::ptr::null_mut()));
+            next.push(std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()));
         }
         Box::new(Self { key, value, next })
     }
@@ -153,6 +155,7 @@ impl<K: Ord + Clone, V: Clone> Default for SkipList<K, V> {
 }
 
 /// Generate a random level for a new node (geometric distribution).
+#[allow(dead_code)]
 fn random_level() -> usize {
     let mut level = 1;
     let mut state = thread_local_random();
@@ -164,6 +167,7 @@ fn random_level() -> usize {
 }
 
 /// A simple thread-local pseudo-random generator (xorshift).
+#[allow(dead_code)]
 fn thread_local_random() -> u64 {
     use std::cell::Cell;
     thread_local! {
