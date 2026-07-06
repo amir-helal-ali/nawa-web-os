@@ -4,7 +4,7 @@
 
 [![License: MIT + Apache 2.0](https://img.shields.io/badge/license-MIT%20%2B%20Apache%202.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org/)
-[![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)](#)
+[![CI](https://github.com/amir-helal-ali/nawa-web-os/actions/workflows/rust.yml/badge.svg)](https://github.com/amir-helal-ali/nawa-web-os/actions)
 [![Status](https://img.shields.io/badge/status-alpha%20v0.1.0-yellow.svg)](#)
 
 <p align="center">
@@ -20,8 +20,9 @@ nawa-rs/
 ├── Cargo.toml              # workspace
 ├── crates/
 │   ├── nawa-kernel/        # io_uring + mmap + zero-copy + lock-free ring buffer
-│   ├── nawa-db/            # MemTable + SSTable + WAL + Bloom filter
-│   ├── nawa-http/          # HTTP/1.1 server + type-safe router
+│   ├── nawa-db/            # MemTable + SSTable + WAL + Bloom filter + SkipList + Compaction
+│   ├── nawa-http/          # HTTP/1.1 server + HTTP/3 + TLS + ACME + router
+│   ├── nawa-wasm/          # WASM sandbox (wasmtime) for user plugins
 │   └── nawad/              # binary (CLI + server + handlers)
 ├── Dockerfile              # multi-stage build
 ├── docker-compose.yml      # single-command deploy
@@ -140,10 +141,16 @@ curl -X DELETE http://localhost:8080/user:1001
 - `router.rs` — type-safe routing with `:params` and `*wildcards`
 - `server.rs` — HTTP/1.1 over TCP, keep-alive, response timing
 - `tls.rs` — rustls-based TLS support (HTTPS)
+- `acme.rs` — Let's Encrypt auto-TLS provisioning
+- `h3.rs` — HTTP/3 + QUIC server (quinn + h3 — stub for v0.2.0)
+
+### nawa-wasm
+- `plugin.rs` — plugin manifest + bytecode container
+- `runtime.rs` — wasmtime sandbox with fuel limits + no WASI
 
 ### nawad
 - CLI: `serve`, `benchmark`, `info`
-- REST handlers for DB ops
+- REST handlers for DB ops + WASM plugin ops
 - Stats endpoint
 
 ---

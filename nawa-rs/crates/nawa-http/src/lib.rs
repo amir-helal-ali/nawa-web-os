@@ -1,12 +1,15 @@
 //! # NAWA HTTP
 //!
-//! HTTP/1.1 server with a type-safe router. For alpha, we use HTTP/1.1
-//! over TCP. HTTP/3 (QUIC) will land in v0.2.0.
+//! HTTP/1.1 + HTTP/3 server with a type-safe router.
 
+pub mod acme;
+pub mod h3;
 pub mod router;
 pub mod server;
 pub mod tls;
 
+pub use acme::{AcmeClient, AcmeConfig, AcmeError};
+pub use h3::{Http3Config, Http3Error, Http3Server};
 pub use router::{Handler, Method, Request, Response, Router, StatusCode};
 pub use server::HttpServer;
 pub use tls::{TlsConfig, TlsError};

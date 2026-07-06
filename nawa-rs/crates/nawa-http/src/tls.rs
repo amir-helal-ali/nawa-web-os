@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// A TLS configuration for the HTTPS server.
+#[derive(Debug)]
 pub struct TlsConfig {
     inner: Arc<rustls::ServerConfig>,
 }

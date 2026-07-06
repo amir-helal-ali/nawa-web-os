@@ -4,6 +4,7 @@ members = [
     "crates/nawa-kernel",
     "crates/nawa-db",
     "crates/nawa-http",
+    "crates/nawa-wasm",
     "crates/nawad",
 ]
 
@@ -48,6 +49,14 @@ chrono = { version = "0.4", features = ["serde"] }
 rustls = "0.23"
 rustls-pemfile = "2.2"
 tokio-rustls = "0.26"
+# WASM runtime (for sandboxed plugins)
+wasmtime = "26"
+# QUIC / HTTP-3
+quinn = "0.11"
+h3 = "0.0.6"
+h3-quinn = "0.0.7"
+http = "1.1"
+bytes-utils = "0.1"
 
 [profile.release]
 opt-level = 3

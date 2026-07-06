@@ -1,13 +1,12 @@
 [package]
-name = "nawa-http"
+name = "nawa-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "NAWA HTTP server + type-safe router"
+description = "NAWA WASM sandbox — run user code safely"
 
 [dependencies]
 nawa-kernel = { path = "../nawa-kernel" }
-nawa-db = { path = "../nawa-db" }
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
@@ -16,9 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 bytes.workspace = true
 chrono.workspace = true
-rustls.workspace = true
-rustls-pemfile.workspace = true
-tokio-rustls.workspace = true
+wasmtime.workspace = true
 
 [dev-dependencies]
 tempfile = "3.14"

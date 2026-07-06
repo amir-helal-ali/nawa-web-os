@@ -297,13 +297,24 @@ impl Router {
 
     /// Try to dispatch a request. Returns 404 if no route matches.
     pub async fn dispatch(&self, mut req: Request) -> Response {
-        for route in &self.routes {
-            if route.method != req.method {
-                continue;
-            }
-            if let Some(params) = route.pattern.matches(&req.path) {
-                req.params = params;
-                return (route.handler)(req).await;
+        // Two-pass matching: literal routes first, then param/wildcard routes.
+        // This ensures /plugins matches before /:key.
+        for pass in 0..2 {
+            for route in &self.routes {
+                if route.method != req.method {
+                    continue;
+                }
+                let is_literal = route.pattern.segments.iter().all(|s| {
+                    matches!(s, PatternSegment::Literal(_))
+                });
+                // Pass 0: only literal routes. Pass 1: all routes.
+                if pass == 0 && !is_literal {
+                    continue;
+                }
+                if let Some(params) = route.pattern.matches(&req.path) {
+                    req.params = params;
+                    return (route.handler)(req).await;
+                }
             }
         }
         Response::not_found(format!("no route for {} {}", req.method.as_str(), req.path))

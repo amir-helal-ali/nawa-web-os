@@ -78,6 +78,11 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
     let db = Arc::new(DbEngine::open(db_config)?);
     tracing::info!("NAWA-DB opened — {} keys", db.len());
 
+    let sandbox = Arc::new(tokio::sync::Mutex::new(
+        nawa_wasm::Sandbox::default().map_err(|e| anyhow::anyhow!("sandbox init failed: {e}"))?,
+    ));
+    tracing::info!("WASM sandbox initialized — {} plugins", sandbox.lock().await.len());
+
     let mut router = Router::new();
 
     // Health check
@@ -187,6 +192,59 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
         });
     }
 
+    // GET /plugins — list loaded WASM plugins
+    {
+        let sandbox = sandbox.clone();
+        router.get("/plugins", move |_| {
+            let sandbox = sandbox.clone();
+            async move {
+                let sb = sandbox.lock().await;
+                let plugins = sb.list();
+                let body = serde_json::json!({
+                    "count": plugins.len(),
+                    "plugins": plugins,
+                });
+                Response::json(&body)
+            }
+        });
+    }
+
+    // POST /plugins/:name/invoke — invoke a plugin function
+    {
+        let sandbox = sandbox.clone();
+        router.post("/plugins/:name/invoke", move |req| {
+            let sandbox = sandbox.clone();
+            async move {
+                let name = req.param("name").unwrap_or("").to_string();
+                let func = req.body_str().to_string();
+                let sb = sandbox.lock().await;
+                match sb.invoke(&name, &func) {
+                    Ok(result) => {
+                        let body = serde_json::json!({
+                            "plugin": name,
+                            "function": func,
+                            "result": result,
+                            "status": "ok"
+                        });
+                        Response::json(&body)
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({
+                            "plugin": name,
+                            "function": func,
+                            "error": e.to_string(),
+                            "status": "error"
+                        });
+                        let mut r = Response::new(StatusCode(500));
+                        r.header("Content-Type", "application/json");
+                        r.body = serde_json::to_vec(&body).unwrap_or_default();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
     // GET / — root info
     router.get("/", |_| async {
         let body = serde_json::json!({
@@ -199,6 +257,8 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
                 "POST /:key",
                 "DELETE /:key",
                 "GET /scan/:prefix",
+                "GET /plugins",
+                "POST /plugins/:name/invoke",
             ]
         });
         Response::json(&body)
