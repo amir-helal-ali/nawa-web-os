@@ -7,6 +7,7 @@ members = [
     "crates/nawa-uring",
     "crates/nawa-wasm",
     "crates/nawa-auth",
+    "crates/nawa-frontend",
     "crates/nawad",
     "crates/nawa-cli",
     "examples/blog-site",

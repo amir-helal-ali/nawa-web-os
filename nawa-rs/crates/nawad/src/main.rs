@@ -12,6 +12,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use metrics::Metrics;
 use nawa_db::{DbEngine, Value};
+use nawa_frontend::{html::*, island::Island, template::PageTemplate};
 use nawa_http::{HttpServer, Response, Router, StatusCode};
 use tracing_subscriber::EnvFilter;
 
@@ -309,6 +310,66 @@ async fn serve(addr: String, data_dir: PathBuf, wal_sync: bool) -> anyhow::Resul
                         r
                     }
                 }
+            }
+        });
+    }
+
+    // GET /ssr — SSR page rendered with nawa-frontend (Frontend Engine integration)
+    {
+        let db = db.clone();
+        router.get("/ssr", move |_| {
+            let db = db.clone();
+            async move {
+                // Fetch data from NAWA-DB (Backend Engine).
+                let entries = db.scan_prefix("", 100);
+
+                // Build SSR page with nawa-frontend (Frontend Engine).
+                let mut template = PageTemplate::new("NAWA", "SSR Demo")
+                    .css(nawa_frontend::template::default_css())
+                    .nav_item("Home", "/")
+                    .nav_item("SSR", "/ssr")
+                    .nav_item("Health", "/health")
+                    .nav_item("Metrics", "/metrics")
+                    .content(h1().text("🦀 NAWA SSR — Frontend Engine"))
+                    .content(p().text("هذه الصفحة مُصيَّرة بـ nawa-frontend — محرك الواجهة الحقيقي."));
+
+                // List DB entries as HTML.
+                if entries.is_empty() {
+                    template = template.content(p().text("لا توجد بيانات. استخدم POST /:key لإضافة."));
+                } else {
+                    let mut table_el = table();
+                    table_el = table_el.child(
+                        tr().child(th().text("Key")).child(th().text("Value"))
+                    );
+                    for (k, v) in &entries {
+                        let key_str = String::from_utf8_lossy(k);
+                        let val_str = v.display();
+                        let display_val: String = val_str.chars().take(60).collect();
+                        table_el = table_el.child(
+                            tr()
+                                .child(td().text(key_str.to_string()))
+                                .child(td().text(display_val))
+                        );
+                    }
+                    template = template.content(table_el);
+                }
+
+                // Add an interactive island (counter).
+                let counter_island = Island::new("counter", "Counter")
+                    .props(serde_json::json!({"initial": 0}))
+                    .content(
+                        div().class("island-demo")
+                            .child(h2().text("Interactive Island (Counter)"))
+                            .child(p().text("Count: 0"))
+                            .child(button().text("+1"))
+                    );
+                template = template.island(counter_island);
+
+                // Render complete HTML.
+                let html = template.render();
+                let mut resp = Response::text(html);
+                resp.header("Content-Type", "text/html; charset=utf-8");
+                resp
             }
         });
     }
