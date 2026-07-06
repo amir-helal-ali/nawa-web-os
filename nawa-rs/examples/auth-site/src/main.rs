@@ -31,11 +31,12 @@ async fn main() -> anyhow::Result<()> {
     println!("✓ Users: {}", auth.user_count());
 
     let addr = "0.0.0.0:8080";
-    println!("\n🚀 Auth site running on http://localhost:{addr}");
-    println!("\n   Register:  http://localhost:8080/register");
-    println!("   Login:     http://localhost:8080/login");
-    println!("   Dashboard: http://localhost:8080/dashboard");
-    println!("   Settings:  http://localhost:8080/settings\n");
+    let port = addr.split(':').last().unwrap_or("8080");
+    println!("\n🚀 Auth site running on http://localhost:{port}");
+    println!("\n   Register:  http://localhost:{port}/register");
+    println!("   Login:     http://localhost:{port}/login");
+    println!("   Dashboard: http://localhost:{port}/dashboard");
+    println!("   Settings:  http://localhost:{port}/settings\n");
     println!("Press Ctrl+C to stop\n");
 
     let listener = TcpListener::bind(addr).await?;
@@ -287,7 +288,19 @@ fn route(
             match &current_user {
                 Some(user) if user.role == "admin" => {
                     let users = auth.list_users().unwrap_or_default();
-                    let json = serde_json::json!({ "users": users, "count": users.len() });
+                    // SECURITY: strip password_hash from response.
+                    let safe_users: Vec<_> = users.iter().map(|u| {
+                        serde_json::json!({
+                            "id": u.id,
+                            "username": u.username,
+                            "email": u.email,
+                            "role": u.role,
+                            "verified": u.verified,
+                            "created_at": u.created_at,
+                            "last_login": u.last_login,
+                        })
+                    }).collect();
+                    let json = serde_json::json!({ "users": safe_users, "count": safe_users.len() });
                     ("200 OK".into(), "application/json".into(),
                         serde_json::to_string(&json).unwrap(), None)
                 }
@@ -432,7 +445,13 @@ th{color:#f59e0b;font-size:0.85rem}
 // ─── Helpers ─────────────────────────────────────────────────
 
 fn extract_cookie(cookie_header: &str, name: &str) -> Option<String> {
-    cookie_header
+    // Remove "Cookie:" prefix if present.
+    let header_value = if cookie_header.to_lowercase().starts_with("cookie:") {
+        cookie_header[7..].trim()
+    } else {
+        cookie_header.trim()
+    };
+    header_value
         .split(';')
         .find_map(|c| {
             let c = c.trim();
