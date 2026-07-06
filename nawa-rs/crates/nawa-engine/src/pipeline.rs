@@ -7,7 +7,8 @@
 use crate::components;
 use crate::design::DesignSystem;
 use crate::zerocopy_html::ZeroCopyHtml;
-use nawa_db::{DbEngine, Value};
+use nawa_db::DbEngine;
+#[allow(unused_imports)] use nawa_db::Value;
 use std::sync::Arc;
 
 /// The unified engine context — shared state for a single request.
