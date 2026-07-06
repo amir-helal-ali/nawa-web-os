@@ -39,7 +39,7 @@ enum Commands {
         name: String,
 
         /// Template to use.
-        #[arg(short, long, default_value = "blog")]
+        #[arg(short, long, default_value = "auth")]
         template: String,
 
         /// Target directory (default: current dir).
@@ -113,6 +113,7 @@ enum Commands {
 }
 
 const TEMPLATES: &[(&str, &str)] = &[
+    ("auth", "Full auth system — register/login/dashboard/admin/settings (DEFAULT)"),
     ("blog", "Blog / CMS with SSR + SEO + admin panel"),
     ("saas", "Multi-tenant SaaS with subscriptions + billing"),
     ("shop", "E-commerce with cart + checkout + inventory"),
