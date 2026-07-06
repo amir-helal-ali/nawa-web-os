@@ -133,6 +133,29 @@ pub fn render_error(msg: &str, back_url: &str) -> String {
     format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>خطأ — NAWA</title><style>{CSS}</style></head><body><div class="nawa-container"><div class="nawa-card nawa-fade-in" style="text-align:center"><h1 style="color:#dc2626">⚠ {msg}</h1><a href="{back_url}" class="nawa-btn nawa-btn-secondary" style="margin-top:1rem">العودة</a></div></div></body></html>"#, msg = msg, back_url = back_url)
 }
 
+
+/// Render a beautiful 404 page.
+#[allow(dead_code)]
+pub fn render_404(path: &str) -> String {
+    format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>404 — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a></nav><div class="nawa-container"><div class="nawa-card nawa-fade-in" style="text-align:center;padding:3rem"><h1 style="font-size:4rem;color:var(--nawa-primary)">404</h1><p style="font-size:1.2rem;color:var(--nawa-text-muted);margin:1rem 0">الصفحة غير موجودة</p><code style="color:var(--nawa-text-muted)">{path}</code><br><a href="/" class="nawa-btn nawa-btn-primary" style="margin-top:2rem">← العودة للرئيسية</a></div></div></body></html>"#, path = path)
+}
+
+/// Render a beautiful 500 page.
+#[allow(dead_code)]
+pub fn render_500(error: &str) -> String {
+    format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>خطأ — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a></nav><div class="nawa-container"><div class="nawa-card nawa-fade-in" style="text-align:center;padding:3rem"><h1 style="font-size:4rem;color:var(--nawa-danger)">⚠</h1><p style="font-size:1.2rem;margin:1rem 0">خطأ داخلي في الخادم</p><code style="color:var(--nawa-text-muted);word-break:break-all">{error}</code><br><a href="/" class="nawa-btn nawa-btn-secondary" style="margin-top:2rem">← العودة</a></div></div></body></html>"#, error = error)
+}
+
+/// Render password reset request page.
+pub fn render_password_reset() -> String {
+    format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>استعادة كلمة المرور — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a><div class="nawa-nav-links"><a href="/login">Login</a></div></nav><div class="nawa-container"><div class="nawa-card nawa-fade-in"><h1>🔑 استعادة كلمة المرور</h1><p style="color:#888;margin-bottom:1rem">أدخل بريدك الإلكتروني لاستلام رمز الاستعادة.</p><form method="POST" action="/password-reset"><label class="nawa-label">البريد الإلكتروني</label><input type="email" name="email" class="nawa-input" placeholder="email@example.com" required><button type="submit" class="nawa-btn nawa-btn-primary" style="margin-top:1rem;width:100%">إرسال رمز الاستعادة</button></form></div></div></body></html>"#)
+}
+
+/// Render password reset confirmation page.
+pub fn render_password_reset_confirm(email: &str) -> String {
+    format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>رمز الاستعادة — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a></nav><div class="nawa-container"><div class="nawa-card nawa-fade-in"><h1>✅ تم إرسال الرمز</h1><p style="color:#888;margin-bottom:1rem">تم إرسال رمز الاستعادة إلى <strong>{email}</strong>.</p><p style="color:var(--nawa-text-muted);font-size:0.9rem">في النظام الحقيقي، سيُرسل الرمز عبر البريد. في النواة الحالية، استخدم الـ API:</p><code style="display:block;padding:1rem;margin:1rem 0;background:var(--nawa-bg);border-radius:8px">POST /auth/reset-password&#10;{{"email":"{email}","new_password":"..."}}</code><a href="/login" class="nawa-btn nawa-btn-primary">العودة لتسجيل الدخول</a></div></div></body></html>"#, email = email)
+}
+
 /// NAWA Design System CSS.
 const CSS: &str = r#"
 :root{--nawa-bg:#0d0c0a;--nawa-surface:#1a1a1a;--nawa-surface-hover:#222;--nawa-border:#2a2a2a;--nawa-text:#e0e0e0;--nawa-text-muted:#888;--nawa-primary:#f59e0b;--nawa-primary-hover:#d97706;--nawa-accent:#10b981;--nawa-danger:#dc2626;--nawa-radius:12px;--nawa-radius-sm:8px;--nawa-transition:0.2s ease}
