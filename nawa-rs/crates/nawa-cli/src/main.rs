@@ -98,6 +98,13 @@ enum Commands {
         verbose: bool,
     },
 
+    /// Run the example blog site.
+    Serve {
+        /// Address to bind on.
+        #[arg(long, default_value = "0.0.0.0:8080")]
+        addr: String,
+    },
+
     /// Show version and component info.
     Info,
 
@@ -142,6 +149,7 @@ fn main() -> anyhow::Result<()> {
             bench,
             verbose,
         } => run_tests(&crate_name, bench, verbose),
+        Commands::Serve { addr } => serve_example(&addr),
         Commands::Info => {
             print_info();
             Ok(())
@@ -616,6 +624,38 @@ fn run_tests(
     }
 
     println!("\n✓ All tests passed!");
+    Ok(())
+}
+
+fn serve_example(addr: &str) -> anyhow::Result<()> {
+    println!("🚀 Starting NAWA Blog Site example...\n");
+    println!("This builds and runs the example blog website from examples/blog-site/");
+    println!();
+    println!("Building...");
+    let build_status = Command::new("cargo")
+        .args(["build", "--release", "--example", "blog-site"])
+        .status()?;
+    if !build_status.success() {
+        anyhow::bail!("build failed");
+    }
+    println!("✓ Build complete");
+    println!();
+    println!("Starting server on {addr}...");
+    println!();
+    println!("  Home:   http://localhost:{}", addr.split(':').last().unwrap_or("8080"));
+    println!("  API:    http://localhost:{}/api", addr.split(':').last().unwrap_or("8080"));
+    println!("  Health: http://localhost:{}/health", addr.split(':').last().unwrap_or("8080"));
+    println!();
+    println!("Press Ctrl+C to stop");
+    println!();
+
+    // Run the example with the addr as env var.
+    let status = Command::new("cargo")
+        .args(["run", "--release", "--example", "blog-site"])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("example failed");
+    }
     Ok(())
 }
 

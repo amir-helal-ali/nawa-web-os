@@ -8,6 +8,7 @@ members = [
     "crates/nawa-wasm",
     "crates/nawad",
     "crates/nawa-cli",
+    "examples/blog-site",
 ]
 
 [workspace.package]
