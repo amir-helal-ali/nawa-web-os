@@ -101,6 +101,56 @@ impl WriteAheadLog {
         guard.get_ref().sync_all()
     }
 
+    /// Async sync via io_uring (requires `uring-wal` feature).
+    ///
+    /// When the `uring-wal` feature is enabled, this submits an fsync
+    /// operation through the io_uring pipeline instead of the blocking
+    /// `fsync(2)` syscall. This allows other operations to proceed
+    /// while the fsync is in flight.
+    #[cfg(feature = "uring-wal")]
+    pub async fn sync_async(
+        &self,
+        uring: &nawa_uring::NawaUring,
+    ) -> Result<(), nawa_uring::UringError> {
+        // First flush the BufWriter to the underlying file.
+        {
+            let mut guard = self.file.lock().unwrap();
+            guard.flush().map_err(|e| {
+                nawa_uring::UringError::Submit(format!("wal flush failed: {e}"))
+            })?;
+        }
+
+        // Get the raw fd of the underlying file.
+        // We need to open a fresh handle to get the fd since BufWriter
+        // owns the File. In production, we'd store the fd separately.
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .map_err(nawa_uring::UringError::Io)?;
+        let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
+
+        // Submit fsync via io_uring.
+        let entry = nawa_uring::SubmissionEntry::fsync(fd, 0);
+        let cqe = uring.submit(entry).await?;
+
+        if cqe.is_err() {
+            return Err(nawa_uring::UringError::Complete(format!(
+                "fsync failed with error code: {}",
+                cqe.error_code().unwrap_or(0)
+            )));
+        }
+        Ok(())
+    }
+
+    /// Async sync — fallback when uring-wal feature is disabled.
+    ///
+    /// Falls back to blocking `sync()` since we don't have io_uring.
+    /// The sync is fast (just fsync) so blocking is acceptable.
+    #[cfg(not(feature = "uring-wal"))]
+    pub async fn sync_async(&self) -> std::io::Result<()> {
+        self.sync()
+    }
+
     /// Replay all entries from the WAL (for crash recovery).
     pub fn replay(&self) -> std::io::Result<Vec<WalEntry>> {
         let mut entries = Vec::new();

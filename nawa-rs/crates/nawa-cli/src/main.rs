@@ -314,17 +314,66 @@ ENTRYPOINT ["/usr/local/bin/nawa-app"]
 fn dev_server(addr: &str, data_dir: &std::path::Path) -> anyhow::Result<()> {
     println!("Starting NAWA dev server on {addr}");
     println!("Data directory: {}", data_dir.display());
+    println!("Hot reload: watching src/ for changes");
     println!("\nPress Ctrl+C to stop\n");
 
-    // Try to find and run nawad.
     let nawad_path = find_nawad();
     match nawad_path {
         Some(path) => {
-            let mut cmd = Command::new(path);
-            cmd.arg("serve").arg("--addr").arg(addr).arg("--data-dir").arg(data_dir);
-            let status = cmd.status()?;
-            if !status.success() {
-                anyhow::bail!("nawad exited with status: {status}");
+            // Start the server in a child process.
+            let mut child = spawn_nawad(&path, addr, data_dir)?;
+            println!("✓ NAWA dev server running on http://localhost:{addr}");
+
+            // Watch src/ for changes (simple polling).
+            let src_dir = std::path::Path::new("src");
+            let mut last_mtime = get_dir_mtime(src_dir);
+
+            println!("Watching {} for changes...", src_dir.display());
+
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+
+                // Check if source files changed.
+                let current_mtime = get_dir_mtime(src_dir);
+                if current_mtime != last_mtime {
+                    last_mtime = current_mtime;
+                    println!("\n⚡ Change detected — rebuilding...");
+
+                    // Kill the old server.
+                    let _ = child.kill();
+                    let _ = child.wait();
+
+                    // Rebuild.
+                    println!("  Compiling...");
+                    let build_status = Command::new("cargo")
+                        .args(["build", "--release", "-p", "nawad"])
+                        .status()?;
+
+                    if build_status.success() {
+                        println!("  ✓ Build complete — restarting server");
+                        child = spawn_nawad(&path, addr, data_dir)?;
+                        println!("✓ NAWA dev server restarted on http://localhost:{addr}");
+                    } else {
+                        println!("  ✗ Build failed — fix errors and save to retry");
+                        // Start the old binary anyway so the user can see the error.
+                        child = spawn_nawad(&path, addr, data_dir)?;
+                    }
+                }
+
+                // Check if child process exited.
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            println!("Server exited with status: {status}");
+                        }
+                        break;
+                    }
+                    Ok(None) => {} // still running
+                    Err(e) => {
+                        eprintln!("Error checking server status: {e}");
+                        break;
+                    }
+                }
             }
             Ok(())
         }
@@ -335,6 +384,44 @@ fn dev_server(addr: &str, data_dir: &std::path::Path) -> anyhow::Result<()> {
             anyhow::bail!("nawad not found")
         }
     }
+}
+
+fn spawn_nawad(
+    path: &std::path::Path,
+    addr: &str,
+    data_dir: &std::path::Path,
+) -> anyhow::Result<std::process::Child> {
+    let child = Command::new(path)
+        .arg("serve")
+        .arg("--addr")
+        .arg(addr)
+        .arg("--data-dir")
+        .arg(data_dir)
+        .spawn()?;
+    Ok(child)
+}
+
+fn get_dir_mtime(dir: &std::path::Path) -> Option<std::time::SystemTime> {
+    if !dir.exists() {
+        return None;
+    }
+    let mut latest: Option<std::time::SystemTime> = None;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(mtime) = metadata.modified() {
+                    latest = Some(latest.map_or(mtime, |l: std::time::SystemTime| l.max(mtime)));
+                }
+                // Recurse into subdirectories.
+                if metadata.is_dir() {
+                    if let Some(sub_mtime) = get_dir_mtime(&entry.path()) {
+                        latest = Some(latest.map_or(sub_mtime, |l| l.max(sub_mtime)));
+                    }
+                }
+            }
+        }
+    }
+    latest
 }
 
 fn build_project() -> anyhow::Result<()> {

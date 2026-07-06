@@ -102,6 +102,83 @@ impl Sandbox {
         Ok(())
     }
 
+    /// Load a WASM plugin from a .wasm file on disk.
+    ///
+    /// Reads the file, creates a Plugin with the given manifest,
+    /// and loads it into the sandbox.
+    pub fn load_from_file(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        manifest: crate::PluginManifest,
+    ) -> SandboxResult<()> {
+        let path = path.as_ref();
+        let bytecode = std::fs::read(path).map_err(|e| {
+            SandboxError::Compile(format!("failed to read {}: {e}", path.display()))
+        })?;
+
+        // Verify it's a valid WASM file (magic number: 0x00 0x61 0x73 0x6d).
+        if bytecode.len() < 4 || &bytecode[0..4] != b"\x00asm" {
+            return Err(SandboxError::Compile(format!(
+                "{} is not a valid WASM file",
+                path.display()
+            )));
+        }
+
+        let plugin = Plugin::new(manifest, bytecode);
+        tracing::info!(
+            plugin = plugin.name(),
+            file = %path.display(),
+            size = plugin.size(),
+            "loading WASM plugin from file"
+        );
+        self.load(plugin)
+    }
+
+    /// Load all .wasm files from a directory.
+    ///
+    /// Each file is loaded with a default manifest derived from the filename.
+    /// Returns the number of plugins successfully loaded.
+    pub fn load_from_dir(
+        &mut self,
+        dir: impl AsRef<std::path::Path>,
+    ) -> SandboxResult<usize> {
+        let dir = dir.as_ref();
+        if !dir.exists() {
+            return Ok(0);
+        }
+
+        let mut count = 0;
+        for entry in std::fs::read_dir(dir).map_err(|e| {
+            SandboxError::Compile(format!("failed to read dir {}: {e}", dir.display()))
+        })? {
+            let entry = entry.map_err(|e| {
+                SandboxError::Compile(format!("dir entry error: {e}"))
+            })?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let manifest = crate::PluginManifest::new(&name, "0.0.0")
+                    .with_description(format!("Auto-loaded from {}", path.display()));
+                match self.load_from_file(&path, manifest) {
+                    Ok(()) => count += 1,
+                    Err(e) => {
+                        tracing::warn!(
+                            file = %path.display(),
+                            error = %e,
+                            "failed to load WASM plugin, skipping"
+                        );
+                    }
+                }
+            }
+        }
+        tracing::info!(loaded = count, dir = %dir.display(), "loaded WASM plugins from directory");
+        Ok(count)
+    }
+
     /// Unload a plugin.
     pub fn unload(&mut self, name: &str) -> bool {
         self.plugins.remove(name).is_some()

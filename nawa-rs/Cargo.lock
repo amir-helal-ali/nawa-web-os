@@ -1136,6 +1136,7 @@ dependencies = [
  "crossbeam",
  "memmap2",
  "nawa-kernel",
+ "nawa-uring",
  "serde",
  "serde_json",
  "tempfile",

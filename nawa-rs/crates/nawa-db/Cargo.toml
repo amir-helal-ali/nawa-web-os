@@ -7,6 +7,7 @@ description = "NAWA-DB — built-in hybrid KV/Document database"
 
 [dependencies]
 nawa-kernel = { path = "../nawa-kernel" }
+nawa-uring = { path = "../nawa-uring", optional = true }
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
@@ -19,6 +20,10 @@ arc-swap.workspace = true
 xxhash-rust.workspace = true
 memmap2.workspace = true
 chrono.workspace = true
+
+[features]
+default = []
+uring-wal = ["nawa-uring"]
 
 [dev-dependencies]
 tempfile = "3.14"
