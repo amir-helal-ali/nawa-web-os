@@ -442,20 +442,92 @@ fn deploy(target: &Option<String>, remote_data_dir: &std::path::Path) -> anyhow:
             println!("Deploying locally...");
             println!("  Data directory: {}", remote_data_dir.display());
             println!("\nFor remote deployment:");
-            println!("  nawa deploy --target ssh://user@your-vps");
+            println!("  nawa deploy --target user@your-vps");
             Ok(())
         }
         Some(target) => {
-            println!("Deploying to {target}...");
+            println!("🚀 Deploying to {target}...");
             println!("  Remote data: {}", remote_data_dir.display());
-            println!("\nDeployment steps:");
-            println!("  1. Build Docker image: docker build -t nawa-app .");
-            println!("  2. Push to registry: docker push nawa-app");
-            println!("  3. SSH to {target}");
-            println!("  4. Pull image: docker pull nawa-app");
-            println!("  5. Run: docker run -d -p 80:8080 -v {data}:{data} nawa-app",
-                data = remote_data_dir.display());
-            println!("\n✓ Deployment plan generated");
+
+            // Step 1: Build release binary
+            println!("\n📦 Step 1/4: Building release binary...");
+            let build_status = Command::new("cargo")
+                .args(["build", "--release", "-p", "nawad"])
+                .status()?;
+            if !build_status.success() {
+                anyhow::bail!("cargo build failed");
+            }
+            println!("  ✓ Binary built");
+
+            // Step 2: Create tarball
+            println!("\n📦 Step 2/4: Creating tarball...");
+            let tarball = "/tmp/nawad-deploy.tar.gz";
+            let tar_status = Command::new("tar")
+                .args([
+                    "-czf",
+                    tarball,
+                    "-C",
+                    "target/release",
+                    "nawad",
+                ])
+                .status()?;
+            if !tar_status.success() {
+                anyhow::bail!("tar failed");
+            }
+            let tarball_size = std::fs::metadata(tarball)?.len();
+            println!("  ✓ Tarball: {} ({} KB)", tarball, tarball_size / 1024);
+
+            // Step 3: Upload via SCP
+            println!("\n📦 Step 3/4: Uploading to {target}...");
+            let scp_status = Command::new("scp")
+                .args([tarball, &format!("{target}:/tmp/")])
+                .status();
+            match scp_status {
+                Ok(s) if s.success() => println!("  ✓ Uploaded"),
+                Ok(s) => {
+                    println!("  ⚠ SCP failed (exit {}), showing manual steps:", s);
+                    println!("    scp {} {}:/tmp/", tarball, target);
+                }
+                Err(e) => {
+                    println!("  ⚠ SCP not available: {e}");
+                    println!("    Manual: scp {} {}:/tmp/", tarball, target);
+                }
+            }
+
+            // Step 4: Remote install + start
+            println!("\n📦 Step 4/4: Remote install + start...");
+            let remote_cmd = format!(
+                "mkdir -p {data} && \
+                 tar xzf /tmp/nawad-deploy.tar.gz -C /tmp/ && \
+                 sudo mv /tmp/nawad /usr/local/bin/ && \
+                 sudo pkill -f 'nawad serve' 2>/dev/null; \
+                 nohup nawad serve --addr 0.0.0.0:8080 --data-dir {data} > /tmp/nawad.log 2>&1 &",
+                data = remote_data_dir.display()
+            );
+            let ssh_status = Command::new("ssh")
+                .args([target, &remote_cmd])
+                .status();
+            match ssh_status {
+                Ok(s) if s.success() => {
+                    println!("  ✓ Installed and started");
+                }
+                Ok(s) => {
+                    println!("  ⚠ SSH failed (exit {})", s);
+                }
+                Err(e) => {
+                    println!("  ⚠ SSH not available: {e}");
+                }
+            }
+
+            println!("\n✓ Deployment complete!");
+            println!("  Server: http://{target}:8080", );
+            println!("  Health: http://{target}:8080/health");
+            println!("  Metrics: http://{target}:8080/metrics");
+            println!("\nLogs: ssh {target} 'tail -f /tmp/nawad.log'");
+            println!("Stop: ssh {target} 'pkill -f nawad'");
+
+            // Cleanup local tarball
+            let _ = std::fs::remove_file(tarball);
             Ok(())
         }
     }
