@@ -5,17 +5,11 @@
 //! - 0-RTT connection resumption.
 //! - Built-in TLS 1.3.
 //! - Connection migration.
-//!
-//! ## Status
-//!
-//! For the alpha, this module provides the structure and config.
-//! Full HTTP/3 serving will be enabled in v0.2.0 once h3 + h3-quinn
-//! stabilize further.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::router::Router;
+use crate::router::{Method, Request, Response, Router};
 use crate::tls::TlsConfig;
 
 /// HTTP/3 server configuration.
@@ -55,13 +49,23 @@ impl Http3Config {
             max_window: 1_048_576, // 1 MB
         }
     }
+
+    /// Set max concurrent streams.
+    pub fn with_max_streams(mut self, n: u64) -> Self {
+        self.max_streams = n;
+        self
+    }
+
+    /// Set idle timeout.
+    pub fn with_idle_timeout(mut self, ms: u64) -> Self {
+        self.idle_timeout_ms = ms;
+        self
+    }
 }
 
 /// HTTP/3 server.
 ///
-/// For the alpha, this struct holds the config and router but doesn't
-/// actually serve (HTTP/3 stack is stubbed out). v0.2.0 will wire up
-/// `quinn::Endpoint` + `h3_quinn` + `h3::server`.
+/// Uses `quinn` for QUIC transport and `h3` + `h3-quinn` for HTTP/3.
 pub struct Http3Server {
     config: Http3Config,
     router: Arc<Router>,
@@ -91,27 +95,153 @@ impl Http3Server {
         self.router.len()
     }
 
-    /// Start serving HTTP/3.
-    ///
-    /// For the alpha, this returns `NotImplemented`. The real implementation
-    /// will use `quinn::Endpoint::bind` + `h3_quinn::Connection` + `h3::server`.
+    /// Start serving HTTP/3 over QUIC.
     pub async fn serve(self) -> Result<(), Http3Error> {
         tracing::info!(
             addr = %self.config.addr,
             streams = self.config.max_streams,
             routes = self.route_count(),
-            "HTTP/3 server would listen (stub — full impl in v0.2.0)"
+            "HTTP/3 server starting (QUIC + h3)"
         );
-        // For now, sleep forever (in production: real QUIC accept loop).
-        // The real impl:
-        //   let endpoint = quinn::Endpoint::server(self.config.tls, self.config.addr)?;
-        //   while let Some(conn) = endpoint.accept().await {
-        //       let h3_conn = h3::server::new(h3_quinn::Connection::new(conn.await?)).await?;
-        //       // ... handle streams via self.router.dispatch(...)
-        //   }
-        std::future::pending::<()>().await;
+
+        // Build QUIC server config from TLS config.
+        let quinn_server_config = quinn::ServerConfig::with_crypto(self.config.tls.config());
+        let endpoint = quinn::Endpoint::server(quinn_server_config, self.config.addr)
+            .map_err(|e| Http3Error::Quic(e.to_string()))?;
+
+        tracing::info!("HTTP/3 server listening on {}", endpoint.local_addr()?);
+
+        // Accept loop.
+        while let Some(incoming) = endpoint.accept().await {
+            let router = self.router.clone();
+            tokio::spawn(async move {
+                match incoming.await {
+                    Ok(conn) => {
+                        if let Err(e) = handle_h3_connection(conn, router).await {
+                            tracing::debug!("h3 connection error: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("quic accept error: {e}");
+                    }
+                }
+            });
+        }
+
         Ok(())
     }
+}
+
+/// Handle a single HTTP/3 connection.
+async fn handle_h3_connection(
+    conn: quinn::Connection,
+    router: Arc<Router>,
+) -> Result<(), Http3Error> {
+    let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
+        .await
+        .map_err(|e| Http3Error::H3(e.to_string()))?;
+
+    loop {
+        match h3_conn.accept().await {
+            Ok(Some((req_stream, req))) => {
+                let router = router.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_h3_request(req_stream, req, router).await {
+                        tracing::debug!("h3 request error: {e}");
+                    }
+                });
+            }
+            Ok(None) => break,
+            Err(e) => {
+                tracing::debug!("h3 accept error: {e}");
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle a single HTTP/3 request.
+async fn handle_h3_request(
+    mut req_stream: h3::server::RequestStream<mut h3_quinn::BidiStream<bytes::Bytes>>,
+    req: http::Request<()>,
+    router: Arc<Router>,
+) -> Result<(), Http3Error> {
+    let method = match req.method().as_str() {
+        "GET" => Method::Get,
+        "POST" => Method::Post,
+        "PUT" => Method::Put,
+        "DELETE" => Method::Delete,
+        "PATCH" => Method::Patch,
+        "HEAD" => Method::Head,
+        "OPTIONS" => Method::Options,
+        _ => Method::Get,
+    };
+
+    let path = req.uri().path().to_string();
+    let query: std::collections::HashMap<String, String> = req
+        .uri()
+        .query()
+        .map(|q| {
+            q.split('&')
+                .filter_map(|kv| {
+                    let (k, v) = kv.split_once('=')?;
+                    Some((k.to_string(), v.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let headers: std::collections::HashMap<String, String> = req
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    let mut body = Vec::new();
+    while let Some(chunk) = req_stream.recv_data().await.map_err(|e| Http3Error::H3(e.to_string()))? {
+        body.extend_from_slice(&chunk);
+    }
+
+    let nawa_req = Request {
+        method,
+        path,
+        query,
+        headers,
+        body,
+        params: std::collections::HashMap::new(),
+    };
+
+    let resp = router.dispatch(nawa_req).await;
+
+    let status_code = resp.status.0;
+    let response = http::Response::builder()
+        .status(status_code)
+        .header("content-type", "text/plain")
+        .header("content-length", resp.body.len())
+        .header("x-powered-by", "NAWA/0.1.0 HTTP/3")
+        .body(())
+        .map_err(|e| Http3Error::H3(e.to_string()))?;
+
+    req_stream
+        .send_response(response)
+        .await
+        .map_err(|e| Http3Error::H3(e.to_string()))?;
+
+    if !resp.body.is_empty() {
+        req_stream
+            .send_data(bytes::Bytes::from(resp.body))
+            .await
+            .map_err(|e| Http3Error::H3(e.to_string()))?;
+    }
+
+    req_stream
+        .finish()
+        .await
+        .map_err(|e| Http3Error::H3(e.to_string()))?;
+
+    Ok(())
 }
 
 /// HTTP/3 error type.
@@ -123,8 +253,6 @@ pub enum Http3Error {
     H3(String),
     #[error("TLS error: {0}")]
     Tls(#[from] crate::TlsError),
-    #[error("not implemented in alpha — coming in v0.2.0")]
-    NotImplemented,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -132,17 +260,16 @@ pub enum Http3Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
 
     #[test]
     fn http3_error_display() {
-        let e = Http3Error::NotImplemented;
-        assert!(format!("{e}").contains("v0.2.0"));
+        let e = Http3Error::Quic("test".into());
+        assert!(format!("{e}").contains("QUIC"));
     }
 
     #[test]
-    fn http3_error_quic() {
-        let e = Http3Error::Quic("test".into());
-        assert!(format!("{e}").contains("QUIC"));
+    fn http3_error_h3() {
+        let e = Http3Error::H3("parse error".into());
+        assert!(format!("{e}").contains("H3"));
     }
 }

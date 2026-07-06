@@ -19,6 +19,11 @@ chrono.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
+quinn.workspace = true
+h3.workspace = true
+h3-quinn.workspace = true
+http.workspace = true
+bytes-utils.workspace = true
 
 [dev-dependencies]
 tempfile = "3.14"

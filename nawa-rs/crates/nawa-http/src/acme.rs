@@ -67,12 +67,17 @@ impl AcmeConfig {
 /// ACME client — provisions and renews certificates.
 pub struct AcmeClient {
     config: AcmeConfig,
+    /// Pending HTTP-01 challenges (token → key authorization).
+    challenges: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl AcmeClient {
     /// Create a new ACME client.
     pub fn new(config: AcmeConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            challenges: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
     }
 
     /// Provision a certificate for the configured domains.
@@ -127,6 +132,76 @@ impl AcmeClient {
     /// Get the HTTP-01 challenge path for a given token.
     pub fn challenge_path(token: &str) -> String {
         format!("/.well-known/acme-challenge/{token}")
+    }
+
+    /// Register a pending HTTP-01 challenge.
+    ///
+    /// When the ACME server validates the challenge, it will request
+    /// `/.well-known/acme-challenge/{token}` and expect to receive
+    /// the key authorization.
+    pub fn register_challenge(&self, token: &str, key_authorization: &str) {
+        self.challenges
+            .lock()
+            .unwrap()
+            .insert(token.to_string(), key_authorization.to_string());
+        tracing::info!(token = token, "registered ACME challenge");
+    }
+
+    /// Get the key authorization for a challenge token (if registered).
+    ///
+    /// This is called by the HTTP server when it receives a request
+    /// to `/.well-known/acme-challenge/{token}`.
+    pub fn get_challenge_response(&self, token: &str) -> Option<String> {
+        self.challenges.lock().unwrap().get(token).cloned()
+    }
+
+    /// Remove a challenge after validation (success or failure).
+    pub fn remove_challenge(&self, token: &str) -> bool {
+        self.challenges
+            .lock()
+            .unwrap()
+            .remove(token)
+            .is_some()
+    }
+
+    /// Number of pending challenges.
+    pub fn pending_challenges(&self) -> usize {
+        self.challenges.lock().unwrap().len()
+    }
+
+    /// Generate a JWK thumbprint (simplified — for production, use a real JWK library).
+    ///
+    /// In a real implementation, this would:
+    /// 1. Generate an EC key pair (ES256).
+    /// 2. Compute the JWK thumbprint.
+    /// 3. Use it for the key authorization: `{token}.{thumbprint}`.
+    pub fn generate_key_authorization(&self, token: &str) -> String {
+        // Simplified: in production, this would use the account key's JWK thumbprint.
+        // For now, we just use a placeholder.
+        format!("{token}.PLACEHOLDER_THUMBPRINT")
+    }
+
+    /// Check if a cert needs renewal (30 days before expiry).
+    ///
+    /// In a real implementation, this would parse the cert's NotAfter field.
+    pub fn needs_renewal(&self) -> bool {
+        let cert_path = self.config.storage_dir.join("cert.pem");
+        if !cert_path.exists() {
+            return false; // no cert to renew
+        }
+        // For the alpha, we always return false.
+        // A production version would parse the cert and check NotAfter.
+        false
+    }
+
+    /// Get the cert file path.
+    pub fn cert_path(&self) -> std::path::PathBuf {
+        self.config.storage_dir.join("cert.pem")
+    }
+
+    /// Get the key file path.
+    pub fn key_path(&self) -> std::path::PathBuf {
+        self.config.storage_dir.join("key.pem")
     }
 }
 
