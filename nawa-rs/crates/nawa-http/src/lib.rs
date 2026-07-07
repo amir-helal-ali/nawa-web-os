@@ -11,6 +11,8 @@ pub mod tls;
 
 pub use acme::{AcmeClient, AcmeConfig, AcmeError};
 // h3 exports are behind the "http3" feature
+#[cfg(feature = "http3")]
+pub use h3::{Http3Config, Http3Error, Http3Server};
 pub use router::{Handler, Method, Request, Response, Router, StatusCode};
 pub use server::HttpServer;
 pub use tls::{TlsConfig, TlsError};

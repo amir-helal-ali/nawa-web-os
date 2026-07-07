@@ -17,7 +17,7 @@ path = "benches/nawa_benchmarks.rs"
 [dependencies]
 nawa-kernel = { path = "../nawa-kernel" }
 nawa-db = { path = "../nawa-db" }
-nawa-http = { path = "../nawa-http", default-features = false }
+nawa-http = { path = "../nawa-http", default-features = false, features = ["http3"] }
 nawa-uring = { path = "../nawa-uring" }
 nawa-wasm = { path = "../nawa-wasm" }
 nawa-auth = { path = "../nawa-auth" }

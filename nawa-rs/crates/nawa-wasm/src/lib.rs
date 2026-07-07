@@ -13,9 +13,11 @@
 
 pub mod plugin;
 pub mod runtime;
+pub mod ssr;
 
 pub use plugin::{Plugin, PluginManifest};
 pub use runtime::{Sandbox, SandboxConfig, SandboxError, SandboxResult};
+pub use ssr::SsrModule;
 
 /// Maximum fuel (instruction count) for a single plugin invocation.
 pub const DEFAULT_FUEL_LIMIT: u64 = 1_000_000;

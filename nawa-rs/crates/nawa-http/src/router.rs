@@ -174,6 +174,7 @@ pub type Handler = Arc<
 >;
 
 /// A route — method + path pattern + handler.
+#[derive(Clone)]
 struct Route {
     method: Method,
     pattern: PathPattern,
@@ -274,6 +275,7 @@ impl PathPattern {
 }
 
 /// The router — holds all registered routes.
+#[derive(Clone)]
 pub struct Router {
     routes: Vec<Route>,
 }

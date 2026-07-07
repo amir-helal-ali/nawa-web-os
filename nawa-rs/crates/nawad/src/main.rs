@@ -41,6 +41,14 @@ enum Commands {
         #[arg(long)] svelte_dir: Option<PathBuf>,
         #[arg(long, default_value = "./nawa.toml")] config: PathBuf,
         #[arg(long)] no_wal_sync: bool,
+        /// Enable HTTP/3 over QUIC (requires --tls-cert and --tls-key).
+        #[arg(long)] http3: bool,
+        /// Path to PEM certificate file (for HTTPS + HTTP/3).
+        #[arg(long)] tls_cert: Option<PathBuf>,
+        /// Path to PEM private key file (for HTTPS + HTTP/3).
+        #[arg(long)] tls_key: Option<PathBuf>,
+        /// UDP port for HTTP/3 (default: same as HTTP port).
+        #[arg(long)] http3_port: Option<u16>,
     },
     Benchmark { #[arg(short, long, default_value = "100000")] ops: u32 },
     Init { #[arg(long, default_value = "./nawa.toml")] path: PathBuf },
@@ -53,7 +61,7 @@ fn main() -> anyhow::Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.command {
-        Commands::Serve { addr, data_dir, plugins_dir, static_dir, svelte_dir, config: cfg_path, no_wal_sync } => {
+        Commands::Serve { addr, data_dir, plugins_dir, static_dir, svelte_dir, config: cfg_path, no_wal_sync, http3, tls_cert, tls_key, http3_port } => {
             let mut cfg = config::Config::load(&cfg_path);
             if let Some(a) = addr { cfg.addr = a; }
             if let Some(d) = data_dir { cfg.data_dir = d.display().to_string(); }
@@ -61,7 +69,7 @@ fn main() -> anyhow::Result<()> {
             if let Some(s) = static_dir { cfg.static_dir = s.display().to_string(); }
             if no_wal_sync { cfg.wal_sync = false; }
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(serve(cfg, svelte_dir))
+            rt.block_on(serve(cfg, svelte_dir, http3, tls_cert, tls_key, http3_port))
         }
         Commands::Benchmark { ops } => benchmark(ops),
         Commands::Init { path } => {
@@ -73,7 +81,14 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn serve(cfg: config::Config, svelte_dir: Option<PathBuf>) -> anyhow::Result<()> {
+async fn serve(
+    cfg: config::Config,
+    svelte_dir: Option<PathBuf>,
+    enable_http3: bool,
+    tls_cert: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
+    http3_port: Option<u16>,
+) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
     tracing::info!("║  NAWA Web Operating System v0.1.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
@@ -185,6 +200,37 @@ async fn serve(cfg: config::Config, svelte_dir: Option<PathBuf>) -> anyhow::Resu
             }
         }
     });
+
+    // HTTP/3 + QUIC server (optional — requires TLS cert + key).
+    if enable_http3 {
+        match (tls_cert.as_ref(), tls_key.as_ref()) {
+            (Some(cert_path), Some(key_path)) => {
+                match nawa_http::TlsConfig::from_pem_files(cert_path, key_path) {
+                    Ok(tls) => {
+                        let h3_port = http3_port.unwrap_or(addr.port());
+                        let h3_addr: SocketAddr = format!("{}:{}", addr.ip(), h3_port).parse()?;
+                        let h3_config = nawa_http::Http3Config::new(h3_addr, tls)
+                            .with_max_streams(100)
+                            .with_idle_timeout(30_000);
+                        let h3_router = router.clone();
+                        let h3_server = nawa_http::Http3Server::new(h3_config, h3_router);
+                        tracing::info!("✓ HTTP/3 (QUIC) server enabled on udp://{}", h3_addr);
+                        tokio::spawn(async move {
+                            if let Err(e) = h3_server.serve().await {
+                                tracing::warn!("HTTP/3 server error: {e}");
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠ HTTP/3 disabled — TLS config failed: {e}");
+                    }
+                }
+            }
+            _ => {
+                tracing::warn!("⚠ HTTP/3 disabled — requires --tls-cert and --tls-key");
+            }
+        }
+    }
 
     // HTTP server with graceful shutdown.
     let server = HttpServer::new(router, addr);

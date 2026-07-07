@@ -28,11 +28,18 @@
 //! - `GET /robots.txt` — robots with AI crawler allowlist
 //! - Any entity URL → auto-negotiated format based on User-Agent
 
+pub mod google_search_console;
 pub mod healing;
 pub mod negotiation;
 pub mod ontology;
 pub mod photon;
 
+pub use google_search_console::{
+    CrawlErrorCount, CrawlErrorCounts, GoogleSearchConsoleClient,
+    IndexStatusResult, InspectionResult, SearchAnalyticsResponse, SearchAnalyticsRow,
+    ServiceAccountCredentials, SiteEntry, SitesListResponse, TokenResponse,
+    UrlInspectionResult,
+};
 pub use healing::{
     run_background_healing, AppliedFix, HealingConfig, HealingLoop, HealingMode,
     HealingReport, IssueKind, SeoIssue, Severity,

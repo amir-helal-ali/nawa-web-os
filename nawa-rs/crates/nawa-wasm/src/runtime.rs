@@ -239,6 +239,16 @@ impl Sandbox {
     pub fn config(&self) -> &SandboxConfig {
         &self.config
     }
+
+    /// Get a compiled module by name (for SSR use).
+    pub fn get_module(&self, name: &str) -> Option<&Arc<wasmtime::Module>> {
+        self.plugins.get(name)
+    }
+
+    /// Get the wasmtime engine (for SSR module instantiation).
+    pub fn engine(&self) -> &wasmtime::Engine {
+        &self.engine
+    }
 }
 
 #[cfg(test)]
