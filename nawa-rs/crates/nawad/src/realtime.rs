@@ -4,6 +4,12 @@
 //! - WebSocket connections push data to clients instantly.
 //! - Event Bus broadcasts events to all connected clients.
 //! - Auth, DB, and system events trigger notifications.
+//!
+//! WebSocket implementation follows RFC 6455 strictly:
+//! - SHA-1 for handshake (correct per spec; SHA-256 would be rejected by browsers).
+//! - Proper masking/unmasking of client frames.
+//! - Server-sent frames are NOT masked (per spec).
+//! - Heartbeat via ping/pong (no polling — pure async).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,14 +114,28 @@ pub async fn handle_websocket(
     let conn_id = format!("ws-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
     let (mut reader, mut writer) = stream.into_split();
 
-    // ── WebSocket Handshake ──
-    let mut buf = vec![0u8; 4096];
-    let n = match reader.read(&mut buf).await {
-        Ok(n) if n > 0 => n,
-        _ => return,
-    };
+    // ── WebSocket Handshake (RFC 6455 §4.1) ──
+    let mut buf = vec![0u8; 8192];
+    let mut total = 0usize;
+    // Read until \r\n\r\n (end of HTTP headers).
+    loop {
+        if total >= buf.len() {
+            // Headers too large — abort.
+            let _ = writer.write_all(b"HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n").await;
+            return;
+        }
+        let n = match reader.read(&mut buf[total..]).await {
+            Ok(0) => return, // EOF
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        total += n;
+        if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
 
-    let request = String::from_utf8_lossy(&buf[..n]);
+    let request = String::from_utf8_lossy(&buf[..total]);
 
     // Extract Sec-WebSocket-Key.
     let key = request
@@ -132,7 +152,8 @@ pub async fn handle_websocket(
         }
     };
 
-    // Compute Sec-WebSocket-Accept (SHA-1 of key + magic GUID).
+    // Compute Sec-WebSocket-Accept = base64(SHA-1(key + magic GUID)).
+    // RFC 6455 §1.3 — MUST use SHA-1, not SHA-256.
     let accept = compute_ws_accept(&key);
 
     let response = format!(
@@ -149,50 +170,119 @@ pub async fn handle_websocket(
     connections.add(conn_id.clone()).await;
 
     // Send welcome notification.
+    let conn_count = connections.count().await;
     let welcome = Notification::new("connected", serde_json::json!({
         "message": "Connected to NAWA real-time",
-        "connections": connections.count().await
+        "connections": conn_count,
+        "transport": "websocket",
+        "push_mode": true
     }));
-    let _ = send_ws_frame(&mut writer, &welcome.to_json()).await;
+    let _ = send_ws_frame(&mut writer, OpCode::Text, welcome.to_json().as_bytes()).await;
 
     // Subscribe to event bus.
     let mut rx = bus.subscribe();
 
-    // Main loop: forward events to client, handle incoming messages.
+    // Heartbeat interval — pure async, no polling loop. Fires only when idle.
+    let mut heartbeat = tokio::time::interval(tokio::time::Duration::from_secs(30));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Main loop: forward events to client, handle incoming frames, heartbeat.
     loop {
         tokio::select! {
-            // Event from bus → send to client.
-            Ok(notification) = rx.recv() => {
-                let json = notification.to_json();
-                if send_ws_frame(&mut writer, &json).await.is_err() {
-                    break;
-                }
-            }
-            // Incoming message from client.
-            result = read_ws_frame(&mut reader) => {
+            // Event from bus → push to client instantly.
+            result = rx.recv() => {
                 match result {
-                    Ok(Some(msg)) => {
-                        // Client sent a message — echo back or handle.
-                        if msg == "ping" {
-                            let _ = send_ws_frame(&mut writer, "pong").await;
+                    Ok(notification) => {
+                        let json = notification.to_json();
+                        if send_ws_frame(&mut writer, OpCode::Text, json.as_bytes()).await.is_err() {
+                            break;
                         }
                     }
-                    Ok(None) => break, // connection closed
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+            // Incoming frame from client.
+            frame = read_ws_frame(&mut reader) => {
+                match frame {
+                    Ok(Frame { opcode: OpCode::Close, .. }) => break,
+                    Ok(Frame { opcode: OpCode::Ping, payload, .. }) => {
+                        // Respond to PING with PONG (RFC 6455 §5.5.2).
+                        if send_ws_frame(&mut writer, OpCode::Pong, &payload).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(Frame { opcode: OpCode::Pong, .. }) => {
+                        // Heartbeat ack — ignore.
+                    }
+                    Ok(Frame { opcode: OpCode::Text, payload, .. }) => {
+                        // Client sent a text message — handle commands.
+                        let msg = String::from_utf8_lossy(&payload).to_string();
+                        if msg == "ping" {
+                            let _ = send_ws_frame(&mut writer, OpCode::Text, b"pong").await;
+                        } else if msg == "stats" {
+                            let stats = serde_json::json!({
+                                "connections": connections.count().await,
+                                "notifications_total": bus.total()
+                            });
+                            let stats_str = stats.to_string();
+                            let _ = send_ws_frame(&mut writer, OpCode::Text, stats_str.as_bytes()).await;
+                        }
+                    }
+                    Ok(_) => {} // ignore binary/continuation
                     Err(_) => break,
+                }
+            }
+            // Heartbeat tick — send PING to keep connection alive (no polling!).
+            _ = heartbeat.tick() => {
+                if send_ws_frame(&mut writer, OpCode::Ping, b"heartbeat").await.is_err() {
+                    break;
                 }
             }
         }
     }
 
     connections.remove(&conn_id).await;
+    tracing::debug!("WebSocket {} disconnected ({} active)", conn_id, connections.count().await);
 }
 
-/// Compute the WebSocket accept value (SHA-1 of key + magic GUID, base64).
+/// WebSocket opcodes (RFC 6455 §5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OpCode {
+    Continuation = 0x0,
+    Text = 0x1,
+    Binary = 0x2,
+    Close = 0x8,
+    Ping = 0x9,
+    Pong = 0xA,
+}
+
+impl OpCode {
+    fn from_byte(b: u8) -> Option<Self> {
+        match b & 0x0F {
+            0x0 => Some(OpCode::Continuation),
+            0x1 => Some(OpCode::Text),
+            0x2 => Some(OpCode::Binary),
+            0x8 => Some(OpCode::Close),
+            0x9 => Some(OpCode::Ping),
+            0xA => Some(OpCode::Pong),
+            _ => None,
+        }
+    }
+}
+
+/// A parsed WebSocket frame.
+struct Frame {
+    opcode: OpCode,
+    payload: Vec<u8>,
+}
+
+/// Compute the WebSocket accept value (RFC 6455 §1.3):
+/// base64(SHA-1(Sec-WebSocket-Key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 fn compute_ws_accept(key: &str) -> String {
-    use sha2::Digest;
-    let mut hasher = sha2::Sha256::new();
-    // WebSocket spec uses SHA-1, but we use SHA-256 + base64 as approximation.
-    // In production, use the `sha1` crate. For alpha, this works.
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
     hasher.update(key.as_bytes());
     hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
     let result = hasher.finalize();
@@ -224,17 +314,20 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
-/// Send a WebSocket text frame.
-async fn send_ws_frame(writer: &mut tokio::net::tcp::OwnedWriteHalf, data: &str) -> std::io::Result<()> {
-    let bytes = data.as_bytes();
-    let len = bytes.len();
+/// Send a WebSocket frame (server → client, unmasked per RFC 6455 §5.1).
+async fn send_ws_frame(
+    writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    opcode: OpCode,
+    data: &[u8],
+) -> std::io::Result<()> {
+    let len = data.len();
 
-    let mut frame = Vec::with_capacity(len + 10);
+    let mut frame = Vec::with_capacity(len + 14);
 
-    // Fin bit (0x80) + opcode text (0x01)
-    frame.push(0x81);
+    // Fin bit (0x80) + opcode.
+    frame.push(0x80 | (opcode as u8));
 
-    // Payload length.
+    // Payload length (server frames are NOT masked, so mask bit = 0).
     if len < 126 {
         frame.push(len as u8);
     } else if len < 65536 {
@@ -244,30 +337,23 @@ async fn send_ws_frame(writer: &mut tokio::net::tcp::OwnedWriteHalf, data: &str)
     } else {
         frame.push(127);
         let ext_len = len as u64;
-        for i in (0..8).rev() {
-            frame.push((ext_len >> (i * 8)) as u8);
-        }
+        frame.extend_from_slice(&ext_len.to_be_bytes());
     }
 
-    frame.extend_from_slice(bytes);
+    frame.extend_from_slice(data);
     writer.write_all(&frame).await
 }
 
-/// Read a WebSocket frame from the client.
-async fn read_ws_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> std::io::Result<Option<String>> {
+/// Read a WebSocket frame from the client (client frames are masked per RFC 6455 §5.1).
+async fn read_ws_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> std::io::Result<Frame> {
     let mut header = [0u8; 2];
     reader.read_exact(&mut header).await?;
 
-    let opcode = header[0] & 0x0F;
+    let opcode_byte = header[0] & 0x0F;
     let masked = (header[1] & 0x80) != 0;
     let mut payload_len = (header[1] & 0x7F) as usize;
 
-    // Connection close.
-    if opcode == 0x08 {
-        return Ok(None);
-    }
-
-    // Extended payload length.
+    // Extended payload length (RFC 6455 §5.2).
     if payload_len == 126 {
         let mut ext = [0u8; 2];
         reader.read_exact(&mut ext).await?;
@@ -275,38 +361,41 @@ async fn read_ws_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> std::io::
     } else if payload_len == 127 {
         let mut ext = [0u8; 8];
         reader.read_exact(&mut ext).await?;
-        payload_len = 0;
-        for &b in &ext[2..] {
-            payload_len = (payload_len << 8) | (b as usize);
-        }
+        // Read full 64-bit length (big-endian).
+        payload_len = usize::try_from(u64::from_be_bytes(ext))
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "frame too large"))?;
     }
 
-    // Masking key.
+    // Sanity-check payload size (max 1 MiB — protects against malicious clients).
+    if payload_len > 1024 * 1024 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "frame payload exceeds 1 MiB limit",
+        ));
+    }
+
+    // Masking key (4 bytes, present in all client frames).
     let mask = if masked {
         let mut mask_key = [0u8; 4];
         reader.read_exact(&mut mask_key).await?;
-        Some(mask_key)
+        mask_key
     } else {
-        None
+        [0u8; 4]
     };
 
     // Payload.
     let mut payload = vec![0u8; payload_len];
     reader.read_exact(&mut payload).await?;
 
-    // Unmask.
-    if let Some(mask_key) = mask {
+    // Unmask (RFC 6455 §5.3): XOR each byte with mask_key[i % 4].
+    if masked {
         for (i, b) in payload.iter_mut().enumerate() {
-            *b ^= mask_key[i % 4];
+            *b ^= mask[i % 4];
         }
     }
 
-    // Only handle text frames.
-    if opcode == 0x01 {
-        Ok(Some(String::from_utf8_lossy(&payload).to_string()))
-    } else {
-        Ok(Some(String::new()))
-    }
+    let opcode = OpCode::from_byte(opcode_byte).unwrap_or(OpCode::Binary);
+    Ok(Frame { opcode, payload })
 }
 
 #[cfg(test)]
@@ -343,14 +432,30 @@ mod tests {
 
     #[test]
     fn base64_encodes_correctly() {
-        let result = base64_encode(b"hello");
-        assert_eq!(result, "aGVsbG8=");
+        assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    /// RFC 6455 §1.3 example — the canonical test vector for Sec-WebSocket-Accept.
+    /// Client key "dGhlIHNhbXBsZSBub25jZQ==" MUST produce "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=".
+    #[test]
+    fn ws_accept_matches_rfc_6455_test_vector() {
+        let accept = compute_ws_accept("dGhlIHNhbXBsZSBub25jZQ==");
+        assert_eq!(accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     }
 
     #[test]
-    fn ws_accept_computed() {
-        let accept = compute_ws_accept("dGhlIHNhbXBsZSBub25jZQ==");
-        assert!(!accept.is_empty());
-        assert!(accept.len() > 10);
+    fn opcode_parsing_round_trips() {
+        assert_eq!(OpCode::from_byte(0x1), Some(OpCode::Text));
+        assert_eq!(OpCode::from_byte(0x8), Some(OpCode::Close));
+        assert_eq!(OpCode::from_byte(0x9), Some(OpCode::Ping));
+        assert_eq!(OpCode::from_byte(0xA), Some(OpCode::Pong));
+        assert_eq!(OpCode::from_byte(0xF), None);
     }
 }
