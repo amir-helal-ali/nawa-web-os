@@ -200,3 +200,50 @@ footer{text-align:center;padding:2rem;color:#555;border-top:1px solid var(--nawa
 footer a{color:var(--nawa-primary);text-decoration:none}
 @media(max-width:768px){.nawa-nav{flex-direction:column;gap:0.5rem}.nawa-container{padding:1rem}.nawa-stats{flex-direction:column;gap:1rem}}
 "#;
+
+/// Render user profile page (view + edit).
+pub fn render_profile(user: &User) -> String {
+    let verified_badge = if user.verified {
+        r#"<span class="nawa-badge nawa-badge-ok">موثّق</span>"#
+    } else {
+        r#"<span class="nawa-badge nawa-badge-warn">غير موثّق</span>"#
+    };
+    let role_badge = if user.role == "admin" {
+        r#"<span class="nawa-badge nawa-badge-danger">admin</span>"#
+    } else {
+        r#"<span class="nawa-badge nawa-badge-info">user</span>"#
+    };
+    format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>البروفايل — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a><div class="nawa-nav-links"><a href="/">Dashboard</a><a href="/profile">Profile</a><span style="color:#888">{name}</span> <a href="/logout">Logout</a></div></nav><div class="nawa-container nawa-fade-in"><div class="nawa-card"><h1>👤 البروفايل</h1><div class="nawa-stats"><div class="nawa-stat"><div class="nawa-stat-val">{username}</div><div class="nawa-stat-label">اسم المستخدم</div></div><div class="nawa-stat"><div class="nawa-stat-val">{role_badge}</div><div class="nawa-stat-label">الدور</div></div><div class="nawa-stat"><div class="nawa-stat-val">{verified_badge}</div><div class="nawa-stat-label">الحالة</div></div></div></div><div class="nawa-card"><h2>📝 تعديل البيانات</h2><form method="POST" action="/profile"><label class="nawa-label">اسم المستخدم</label><input type="text" name="username" class="nawa-input" value="{username}" required><label class="nawa-label">البريد الإلكتروني</label><input type="email" name="email" class="nawa-input" value="{email}" required><label class="nawa-label">كلمة مرور جديدة (اتركها فارغة لعدم التغيير)</label><input type="password" name="new_password" class="nawa-input" placeholder="••••••"><button type="submit" class="nawa-btn nawa-btn-primary" style="margin-top:1rem">💾 حفظ التغييرات</button></form></div><div class="nawa-card"><h2>📊 معلومات الحساب</h2><table class="nawa-table"><tr><th>ID</th><td><code>{id}</code></td></tr><tr><th>تاريخ الإنشاء</th><td>{created}</td></tr><tr><th>آخر دخول</th><td>{last_login}</td></tr></table></div></div></body></html>"#,
+        name = user.username,
+        username = user.username,
+        email = user.email,
+        id = user.id,
+        created = user.created_at.split('T').next().unwrap_or("?"),
+        last_login = user.last_login.as_ref().and_then(|s| s.split('T').next()).unwrap_or("—"),
+        role_badge = role_badge,
+        verified_badge = verified_badge)
+}
+
+/// Render system info page.
+pub fn render_system(db: &DbEngine, auth: &AuthStore, uring: &NawaUring) -> String {
+    let db_stats = db.stats();
+    let uring_stats = uring.stats();
+    format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>System — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a><div class="nawa-nav-links"><a href="/">Dashboard</a><a href="/system">System</a><a href="/metrics">Metrics</a></div></nav><div class="nawa-container nawa-fade-in"><div class="nawa-card"><h1>🖥 معلومات النظام</h1><table class="nawa-table"><tr><th>الإصدار</th><td><code>0.1.0-alpha</code></td></tr><tr><th>المنصة</th><td>{os} / {arch}</td></tr><tr><th>io_uring</th><td>{real_uring} (entries: {entries})</td></tr><tr><th>SQPOLL</th><td>{sqpoll}</td></tr></table></div><div class="nawa-card"><h2>📊 إحصائيات قاعدة البيانات</h2><table class="nawa-table"><tr><th>المفاتيح</th><td>{keys}</td></tr><tr><th>MemTable bytes</th><td>{memtable}</td></tr><tr><th>عمليات PUT</th><td>{puts}</td></tr><tr><th>عمليات GET</th><td>{gets}</td></tr><tr><th>عمليات DELETE</th><td>{deletes}</td></tr><tr><th>عمليات SCAN</th><td>{scans}</td></tr><tr><th>Flushes</th><td>{flushes}</td></tr></table></div><div class="nawa-card"><h2>⚡ إحصائيات io_uring</h2><table class="nawa-table"><tr><th>Submitted</th><td>{submitted}</td></tr><tr><th>Completed</th><td>{completed}</td></tr><tr><th>In-flight</th><td>{in_flight}</td></tr><tr><th>Errors</th><td>{uring_errors}</td></tr></table></div><div class="nawa-card"><h2>👥 المستخدمون</h2><table class="nawa-table"><tr><th>إجمالي المستخدمين</th><td>{users}</td></tr></table></div><div class="nawa-card"><h2>🔧 المكونات المدمجة</h2><div class="nawa-stats"><div class="nawa-stat"><div class="nawa-stat-val">✓</div><div class="nawa-stat-label">NAWA-DB</div></div><div class="nawa-stat"><div class="nawa-stat-val">✓</div><div class="nawa-stat-label">Auth+RBAC</div></div><div class="nawa-stat"><div class="nawa-stat-val">✓</div><div class="nawa-stat-label">Engine</div></div><div class="nawa-stat"><div class="nawa-stat-val">✓</div><div class="nawa-stat-label">io_uring</div></div><div class="nawa-stat"><div class="nawa-stat-val">✓</div><div class="nawa-stat-label">WASM</div></div><div class="nawa-stat"><div class="nawa-stat-val">✓</div><div class="nawa-stat-label">Metrics</div></div></div></div></div></body></html>"#,
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        real_uring = if uring.is_real_uring() { "✓ مفعّل" } else { "— fallback" },
+        entries = uring.config().entries,
+        sqpoll = if uring.is_sqpoll_enabled() { "✓" } else { "—" },
+        keys = db.len(),
+        memtable = db.memtable_size(),
+        puts = db_stats.puts,
+        gets = db_stats.gets,
+        deletes = db_stats.deletes,
+        scans = db_stats.scans,
+        flushes = db_stats.memtable_flushes,
+        submitted = uring_stats.submitted,
+        completed = uring_stats.completed,
+        in_flight = uring_stats.in_flight,
+        uring_errors = uring_stats.errors,
+        users = auth.user_count())
+}

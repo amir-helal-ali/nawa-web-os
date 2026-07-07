@@ -455,6 +455,76 @@ fn build_router(
         });
     }
 
+    // ═══ USER PROFILE ═══
+    {
+        let auth = auth.clone();
+        router.get("/profile", move |req| {
+            let auth = auth.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(user) => {
+                        let html = dashboard::render_profile(&user);
+                        let mut resp = Response::text(html);
+                        resp.header("Content-Type", "text/html; charset=utf-8");
+                        resp
+                    }
+                    None => {
+                        let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
+                        resp.header("Content-Type", "text/html");
+                        resp
+                    }
+                }
+            }
+        });
+    }
+    {
+        let auth = auth.clone();
+        let db = db.clone();
+        router.post("/profile", move |req| {
+            let auth = auth.clone();
+            let db = db.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(user) => {
+                        let form = parse_form(req.body_str());
+                        let mut updated = user.clone();
+                        if let Some(username) = form.get("username") { updated.username = username.clone(); }
+                        if let Some(email) = form.get("email") {
+                            let old_key = format!("user:email:{}", user.email);
+                            let _ = db.delete(&old_key);
+                            let new_key = format!("user:email:{}", email);
+                            let _ = db.put(&new_key, nawa_db::Value::from_str(&user.id));
+                            updated.email = email.clone();
+                        }
+                        if let Some(pwd) = form.get("new_password") {
+                            if !pwd.is_empty() { updated.password_hash = nawa_auth::password::hash_password(pwd); }
+                        }
+                        let user_json = serde_json::to_string(&updated).unwrap_or_default();
+                        let _ = db.put(format!("user:{}", user.id), nawa_db::Value::from_json_str(&user_json).unwrap_or_else(|_| nawa_db::Value::Bytes(user_json.into_bytes())));
+                        let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/profile"></head><body>تم الحفظ...</body></html>"#);
+                        resp.header("Content-Type", "text/html");
+                        resp
+                    }
+                    None => Response::new(StatusCode(401)),
+                }
+            }
+        });
+    }
+
+    // ═══ SYSTEM INFO ═══
+    {
+        let db = db.clone(); let auth = auth.clone(); let uring = uring.clone();
+        router.get("/system", move |_| {
+            let db = db.clone(); let auth = auth.clone(); let uring = uring.clone();
+            async move {
+                let html = dashboard::render_system(&db, &auth, &uring);
+                let mut resp = Response::text(html);
+                resp.header("Content-Type", "text/html; charset=utf-8");
+                resp
+            }
+        });
+    }
+
     // ═══ BACKUP / RESTORE ═══
     // GET /backup — download DB as JSON (admin only)
     {
@@ -576,7 +646,7 @@ fn build_router(
             "GET /:key","POST /:key","DELETE /:key","GET /scan/:prefix",
             "POST /auth/register","POST /auth/login","GET /auth/me","GET /auth/users",
             "POST /auth/reset-password","GET /password-reset","POST /password-reset",
-            "GET /backup","POST /restore","GET /static/:path","GET /api"]
+            "GET /profile","POST /profile","GET /system","GET /backup","POST /restore","GET /static/:path","GET /api"]
         }))
     });
 
