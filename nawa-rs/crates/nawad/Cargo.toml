@@ -18,6 +18,7 @@ nawa-wasm = { path = "../nawa-wasm" }
 nawa-auth = { path = "../nawa-auth" }
 nawa-engine = { path = "../nawa-engine" }
 nawa-svelte = { path = "../nawa-svelte" }
+nawa-aion = { path = "../nawa-aion" }
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

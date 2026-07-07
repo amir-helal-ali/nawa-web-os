@@ -79,7 +79,8 @@ impl SvelteRenderer {
 
     /// Serve a pre-rendered HTML file (zero-copy if possible).
     fn serve_prerendered(&self, html_path: &str, ctx: &RenderContext<'_>) -> RenderedPage {
-        let full_path = self.root.join("_nawa/pages").join(html_path);
+        // The root is already the _nawa/ directory; pages live at root/pages/.
+        let full_path = self.root.join("pages").join(html_path);
         match std::fs::read(&full_path) {
             Ok(mut html) => {
                 // Inject NAWA bootstrap before </head>.
@@ -212,7 +213,7 @@ window.__NAWA__ = {{
 
     /// Serve a static asset from _nawa/assets/ (CSS, JS, images).
     pub fn serve_asset(&self, asset_path: &str) -> Option<(Vec<u8>, &'static str)> {
-        let full_path = self.root.join("_nawa/assets").join(asset_path);
+        let full_path = self.root.join("assets").join(asset_path);
         let bytes = std::fs::read(&full_path).ok()?;
         let content_type = match Path::new(asset_path).extension().and_then(|e| e.to_str()) {
             Some("js") => "application/javascript; charset=utf-8",

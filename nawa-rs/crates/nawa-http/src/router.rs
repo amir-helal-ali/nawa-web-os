@@ -189,7 +189,8 @@ struct PathPattern {
 enum PatternSegment {
     Literal(String),
     Param(String),
-    Wildcard, // matches anything (e.g., `/static/*`)
+    Wildcard,        // matches one segment (e.g., `/static/*`)
+    CatchAll(String), // matches rest of path (e.g., `/svelte/**` → captures as named param)
 }
 
 impl PathPattern {
@@ -198,7 +199,11 @@ impl PathPattern {
             .split('/')
             .filter(|s| !s.is_empty())
             .map(|s| {
-                if let Some(param) = s.strip_prefix(':') {
+                if let Some(rest) = s.strip_prefix("**") {
+                    // Catch-all: ** or **name
+                    let name = if rest.is_empty() { "_rest".to_string() } else { rest.to_string() };
+                    PatternSegment::CatchAll(name)
+                } else if let Some(param) = s.strip_prefix(':') {
                     PatternSegment::Param(param.to_string())
                 } else if s == "*" {
                     PatternSegment::Wildcard
@@ -212,25 +217,59 @@ impl PathPattern {
 
     fn matches(&self, path: &str) -> Option<HashMap<String, String>> {
         let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        if path_segments.len() != self.segments.len() {
-            return None;
-        }
         let mut params = HashMap::new();
+
+        // Check if the last segment is a catch-all.
+        let has_catchall = matches!(
+            self.segments.last(),
+            Some(PatternSegment::CatchAll(_))
+        );
+
+        if !has_catchall {
+            // Strict length match for non-catchall patterns.
+            if path_segments.len() != self.segments.len() {
+                return None;
+            }
+        } else {
+            // Catch-all: path must have AT LEAST as many segments as pattern (minus the catchall).
+            // The catch-all itself can match zero segments (e.g., /svelte/** matches /svelte).
+            if path_segments.len() < self.segments.len() - 1 {
+                return None;
+            }
+        }
+
         for (i, seg) in self.segments.iter().enumerate() {
             match seg {
                 PatternSegment::Literal(lit) => {
-                    if path_segments[i] != lit {
+                    if path_segments.get(i) != Some(&lit.as_str()) {
                         return None;
                     }
                 }
                 PatternSegment::Param(name) => {
-                    params.insert(name.clone(), path_segments[i].to_string());
+                    if let Some(ps) = path_segments.get(i) {
+                        params.insert(name.clone(), ps.to_string());
+                    } else {
+                        return None;
+                    }
                 }
                 PatternSegment::Wildcard => {
-                    // Always matches.
+                    if path_segments.get(i).is_none() {
+                        return None;
+                    }
+                }
+                PatternSegment::CatchAll(name) => {
+                    // Capture all remaining segments as a single slash-joined string.
+                    let rest: Vec<&str> = path_segments[i..].to_vec();
+                    if rest.is_empty() {
+                        params.insert(name.clone(), String::new());
+                    } else {
+                        params.insert(name.clone(), rest.join("/"));
+                    }
+                    break; // catch-all consumes the rest
                 }
             }
         }
+
         Some(params)
     }
 }
@@ -297,20 +336,30 @@ impl Router {
 
     /// Try to dispatch a request. Returns 404 if no route matches.
     pub async fn dispatch(&self, mut req: Request) -> Response {
-        // Two-pass matching: literal routes first, then param/wildcard routes.
-        // This ensures /plugins matches before /:key.
-        for pass in 0..2 {
+        // Three-pass matching for correct priority:
+        // Pass 0: pure-literal routes (e.g., /health, /svelte)
+        // Pass 1: routes with params but NO catch-all (e.g., /:key, /users/:id)
+        // Pass 2: routes with catch-all (e.g., /svelte/**)
+        // This ensures /health beats /:key beats /svelte/** when they all could match.
+        for pass in 0..3 {
             for route in &self.routes {
                 if route.method != req.method {
                     continue;
                 }
-                let is_literal = route.pattern.segments.iter().all(|s| {
+                let is_pure_literal = route.pattern.segments.iter().all(|s| {
                     matches!(s, PatternSegment::Literal(_))
                 });
-                // Pass 0: only literal routes. Pass 1: all routes.
-                if pass == 0 && !is_literal {
-                    continue;
-                }
+                let has_catchall = route.pattern.segments.iter().any(|s| {
+                    matches!(s, PatternSegment::CatchAll(_))
+                });
+
+                // Pass 0: pure literals only.
+                if pass == 0 && !is_pure_literal { continue; }
+                // Pass 1: param/wildcard routes WITHOUT catch-all.
+                if pass == 1 && (is_pure_literal || has_catchall) { continue; }
+                // Pass 2: catch-all routes.
+                if pass == 2 && !has_catchall { continue; }
+
                 if let Some(params) = route.pattern.matches(&req.path) {
                     req.params = params;
                     return (route.handler)(req).await;

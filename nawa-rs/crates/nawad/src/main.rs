@@ -829,10 +829,46 @@ fn build_router(
     // Mounts a SvelteKit app under /svelte/* — no Node.js required at runtime.
     // The app was pre-compiled by adapter-nawa into _nawa/{manifest.json,pages/,assets/}.
     if let Some(handler) = svelte_handler {
-        // SvelteKit landing page (lists all routes for discovery).
+        // SvelteKit root: /svelte (matches both /svelte and /svelte/ after slash normalization).
         {
             let h = handler.clone();
-            router.get("/svelte", move |_| {
+            let auth_clone = auth.clone();
+            let db_clone = db.clone();
+            router.get("/svelte", move |req| {
+                let h = h.clone();
+                let auth = auth_clone.clone();
+                let db = db_clone.clone();
+                async move {
+                    let token = req.header("cookie")
+                        .and_then(|c| middleware::extract_cookie_value(c, "nawa_token"));
+                    let user = if let Some(t) = &token {
+                        auth.verify_token(t).ok()
+                            .and_then(|claims| auth.get_user(&claims.sub).ok())
+                            .and_then(|u| serde_json::to_value(&u).ok())
+                    } else { None };
+                    let keys: Vec<_> = db.scan_prefix("", 10).into_iter()
+                        .map(|(k, v)| (String::from_utf8_lossy(&k).to_string(), v.display()))
+                        .collect();
+                    let initial_state = serde_json::json!({
+                        "db_keys": keys, "db_size": db.len(),
+                        "auth": { "logged_in": token.is_some() }
+                    });
+                    let query = req.query.clone().into_iter().collect();
+                    let page = h.handle("/", query, token.as_deref(), user, initial_state);
+                    let mut r = Response::text(String::from_utf8_lossy(&page.html).to_string());
+                    r.status = StatusCode(page.status);
+                    r.header("Content-Type", page.content_type);
+                    for (k, v) in page.headers { r.header(&k, &v); }
+                    middleware::add_security_headers(&mut r);
+                    r
+                }
+            });
+        }
+
+        // SvelteKit discovery/info page (separate URL to avoid conflict with /svelte/** root).
+        {
+            let h = handler.clone();
+            router.get("/svelte/_info", move |_| {
                 let h = h.clone();
                 async move {
                     let mut html = String::from(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>NAWA + SvelteKit</title>
@@ -843,7 +879,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                     html.push_str(&h.manifest.app_name);
                     html.push_str("</strong> — ");
                     html.push_str(&h.route_count().to_string());
-                    html.push_str(" routes (no Node.js at runtime)</p><table><tr><th>Pattern</th><th>Methods</th><th>Auth</th><th>Admin</th><th>Type</th></tr>");
+                    html.push_str(" routes (no Node.js at runtime)</p>");
+                    html.push_str(&format!("<p>Visit <a href=\"/svelte/\">/svelte/</a> for the app home page.</p>"));
+                    html.push_str("<table><tr><th>Pattern</th><th>Methods</th><th>Auth</th><th>Admin</th><th>Type</th></tr>");
                     for r in h.manifest.iter_routes() {
                         html.push_str(&format!(
                             "<tr><td><a href=\"/svelte{}\">{}</a></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
@@ -863,18 +901,39 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
             });
         }
 
-        // SvelteKit catch-all route: /svelte/* → dispatch to handler.
+        // SvelteKit catch-all route: /svelte/** → dispatch to handler.
+        // Serves BOTH /svelte (root), /svelte/ (root), and /svelte/<anything> via this catch-all.
         {
             let h = handler.clone();
             let auth_clone = auth.clone();
             let db_clone = db.clone();
-            router.get("/svelte/:path", move |req| {
+            router.get("/svelte/**", move |req| {
                 let h = h.clone();
                 let auth = auth_clone.clone();
                 let db = db_clone.clone();
                 async move {
-                    let path = req.param("path").unwrap_or("").to_string();
-                    let full_path = format!("/{}", path);
+                    // The catch-all captures the rest of the path after /svelte/.
+                    // Empty rest = root route "/", non-empty = "/<rest>".
+                    let rest = req.param("_rest").unwrap_or("").to_string();
+                    let full_path = if rest.is_empty() {
+                        "/".to_string()
+                    } else {
+                        format!("/{}", rest)
+                    };
+
+                    // Special case: /svelte/_assets/<path> → serve static asset.
+                    if rest.starts_with("_assets/") {
+                        let asset_path = &rest["_assets/".len()..];
+                        match h.serve_asset(asset_path) {
+                            Some((bytes, content_type)) => {
+                                let mut r = Response::ok(bytes);
+                                r.header("Content-Type", content_type);
+                                r.header("Cache-Control", "public, max-age=86400");
+                                return r;
+                            }
+                            None => return Response::not_found("asset not found"),
+                        }
+                    }
 
                     // Extract auth token from cookie.
                     let token = req.header("cookie")
@@ -890,7 +949,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                     // Build initial state from NAWA-DB (top 10 keys for the demo).
                     let keys: Vec<_> = db.scan_prefix("", 10).into_iter()
                         .map(|(k, v)| {
-                            (String::from_utf8_lossy(k).to_string(), v.display())
+                            (String::from_utf8_lossy(&k).to_string(), v.display())
                         })
                         .collect();
                     let initial_state = serde_json::json!({
@@ -915,27 +974,105 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
             });
         }
 
-        // SvelteKit static assets: /svelte/_assets/* → serve from _nawa/assets/.
-        {
-            let h = handler.clone();
-            router.get("/svelte/_assets/:path", move |req| {
-                let h = h.clone();
-                async move {
-                    let asset_path = req.param("path").unwrap_or("");
-                    match h.serve_asset(asset_path) {
-                        Some((bytes, content_type)) => {
-                            let mut r = Response::ok(bytes);
-                            r.header("Content-Type", content_type);
-                            r.header("Cache-Control", "public, max-age=86400");
-                            r
-                        }
-                        None => Response::not_found("asset not found"),
-                    }
-                }
-            });
-        }
-
         tracing::debug!("✓ SvelteKit routes mounted under /svelte/*");
+    }
+
+    // ═══ AION SEO ENGINE ═══
+    // Adaptive Intelligent Ontological Network — revolutionary SEO system.
+    // Exposes Knowledge Graph, dynamic sitemap, AI crawler support, and more.
+
+    // GET /__photon__ — Photon Protocol endpoint.
+    // Returns the entire Knowledge Graph in one response (crawlers love this).
+    {
+        let db = db.clone();
+        router.get("/__photon__", move |req| {
+            let db = db.clone();
+            async move {
+                let site_url = format!("http://{}",
+                    req.header("host").unwrap_or("localhost"));
+                let graph = nawa_aion::build_knowledge_graph(&db);
+                let photon = nawa_aion::build_photon_response(&graph, &site_url);
+                let body = serde_json::to_vec_pretty(&photon).unwrap_or_default();
+                let mut r = Response::ok(body);
+                r.header("Content-Type", "application/json; charset=utf-8");
+                r.header("Cache-Control", "public, max-age=300");
+                r.header("X-NAWA-AION", "photon/1.0");
+                r
+            }
+        });
+    }
+
+    // GET /sitemap.xml — dynamic sitemap generated from DB.
+    {
+        let db = db.clone();
+        router.get("/sitemap.xml", move |req| {
+            let db = db.clone();
+            async move {
+                let site_url = format!("http://{}",
+                    req.header("host").unwrap_or("localhost"));
+                let graph = nawa_aion::build_knowledge_graph(&db);
+                let xml = nawa_aion::build_sitemap_xml(&graph, &site_url);
+                let mut r = Response::ok(xml.into_bytes());
+                r.header("Content-Type", "application/xml; charset=utf-8");
+                r.header("Cache-Control", "public, max-age=300");
+                r
+            }
+        });
+    }
+
+    // GET /robots.txt — dynamic robots with AI crawler allowlist.
+    router.get("/robots.txt", move |req| async move {
+        let site_url = format!("http://{}",
+            req.header("host").unwrap_or("localhost"));
+        let txt = nawa_aion::build_robots_txt(&site_url);
+        let mut r = Response::ok(txt.into_bytes());
+        r.header("Content-Type", "text/plain; charset=utf-8");
+        r.header("Cache-Control", "public, max-age=3600");
+        r
+    });
+
+    // GET /aion/stats — AION engine stats (admin/debug).
+    {
+        let db = db.clone();
+        router.get("/aion/stats", move |_| {
+            let db = db.clone();
+            async move {
+                let graph = nawa_aion::build_knowledge_graph(&db);
+                let entity_types: std::collections::HashMap<&str, usize> = {
+                    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+                    for e in &graph.entities {
+                        *counts.entry(e.entity_type.short_name()).or_default() += 1;
+                    }
+                    counts
+                };
+                Response::json(&serde_json::json!({
+                    "status": "active",
+                    "engine": "AION v0.1.0-alpha",
+                    "knowledge_graph": {
+                        "entities": graph.entity_count(),
+                        "relationships": graph.relationship_count(),
+                        "entity_types": entity_types,
+                        "generated_at": graph.generated_at
+                    },
+                    "features": {
+                        "ontological_inference": true,
+                        "adaptive_negotiation": true,
+                        "photon_protocol": true,
+                        "multi_format_rendering": true,
+                        "supported_formats": [
+                            "html+jsonld", "markdown+jsonld", "html+og", "html+twitter",
+                            "rss", "atom", "jsonld", "json", "markdown"
+                        ]
+                    },
+                    "endpoints": {
+                        "photon": "/__photon__",
+                        "sitemap": "/sitemap.xml",
+                        "robots": "/robots.txt",
+                        "stats": "/aion/stats"
+                    }
+                }))
+            }
+        });
     }
 
     // ═══ API INFO ═══
@@ -952,7 +1089,8 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "POST /auth/register","POST /auth/login","GET /auth/me","GET /auth/users",
                 "GET /password-reset","POST /password-reset",
                 "GET /backup","POST /restore","GET /static/:path","GET /api",
-                "GET /svelte","GET /svelte/:path","GET /svelte/_assets/:path"
+                "GET /svelte/_info","GET /svelte/**",
+                "GET /__photon__","GET /sitemap.xml","GET /robots.txt","GET /aion/stats"
             ]
         }))
     });

@@ -1392,6 +1392,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nawa-aion"
+version = "0.1.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "nawa-db",
+ "nawa-engine",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "nawa-auth"
 version = "0.1.0-alpha"
 dependencies = [
@@ -1571,11 +1588,13 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "nawa-aion",
  "nawa-auth",
  "nawa-db",
  "nawa-engine",
  "nawa-http",
  "nawa-kernel",
+ "nawa-svelte",
  "nawa-uring",
  "nawa-wasm",
  "prometheus",

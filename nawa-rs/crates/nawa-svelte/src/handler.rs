@@ -29,21 +29,36 @@ pub struct SvelteHandler {
 
 impl SvelteHandler {
     /// Load a SvelteKit integration from a build directory.
-    /// The directory must contain `_nawa/manifest.json`.
+    /// Accepts either:
+    ///   - The parent directory containing `_nawa/manifest.json`
+    ///   - The `_nawa/` directory itself containing `manifest.json`
     pub fn load(root: impl Into<PathBuf>, ws_url: impl Into<String>) -> anyhow::Result<Arc<Self>> {
         let root = root.into();
-        let manifest_path = root.join("_nawa/manifest.json");
+        // Try _nawa/manifest.json first, then manifest.json directly.
+        let manifest_path = if root.join("_nawa/manifest.json").exists() {
+            root.join("_nawa/manifest.json")
+        } else if root.join("manifest.json").exists() {
+            root.join("manifest.json")
+        } else {
+            anyhow::bail!("no manifest.json found in {} or {}/_nawa/", root.display(), root.display())
+        };
         let manifest = NawaManifest::load(&manifest_path)?;
-        let renderer = SvelteRenderer::new(&root);
+        // Renderer root is the parent of _nawa/ (or the dir itself if manifest is at root).
+        let renderer_root = if root.join("_nawa/manifest.json").exists() {
+            root.join("_nawa")
+        } else {
+            root.clone()
+        };
+        let renderer = SvelteRenderer::new(&renderer_root);
         tracing::info!(
-            "✓ SvelteKit integration loaded: '{}' — {} routes",
-            manifest.app_name, manifest.route_count()
+            "✓ SvelteKit integration loaded: '{}' — {} routes (root: {})",
+            manifest.app_name, manifest.route_count(), renderer_root.display()
         );
         Ok(Arc::new(Self {
             manifest,
             renderer,
             ws_url: ws_url.into(),
-            root,
+            root: renderer_root,
         }))
     }
 
@@ -63,7 +78,7 @@ impl SvelteHandler {
             None => {
                 // No route matched — try SPA fallback if available.
                 if let Some(fallback) = &self.manifest.spa_fallback {
-                    let full_path = self.root.join("_nawa/pages").join(fallback);
+                    let full_path = self.root.join("pages").join(fallback);
                     if let Ok(html) = std::fs::read(&full_path) {
                         return RenderedPage::ok(html);
                     }
