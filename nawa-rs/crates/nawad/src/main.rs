@@ -38,6 +38,7 @@ enum Commands {
         #[arg(long)] data_dir: Option<PathBuf>,
         #[arg(long)] plugins_dir: Option<PathBuf>,
         #[arg(long)] static_dir: Option<PathBuf>,
+        #[arg(long)] svelte_dir: Option<PathBuf>,
         #[arg(long, default_value = "./nawa.toml")] config: PathBuf,
         #[arg(long)] no_wal_sync: bool,
     },
@@ -52,7 +53,7 @@ fn main() -> anyhow::Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.command {
-        Commands::Serve { addr, data_dir, plugins_dir, static_dir, config: cfg_path, no_wal_sync } => {
+        Commands::Serve { addr, data_dir, plugins_dir, static_dir, svelte_dir, config: cfg_path, no_wal_sync } => {
             let mut cfg = config::Config::load(&cfg_path);
             if let Some(a) = addr { cfg.addr = a; }
             if let Some(d) = data_dir { cfg.data_dir = d.display().to_string(); }
@@ -60,7 +61,7 @@ fn main() -> anyhow::Result<()> {
             if let Some(s) = static_dir { cfg.static_dir = s.display().to_string(); }
             if no_wal_sync { cfg.wal_sync = false; }
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(serve(cfg))
+            rt.block_on(serve(cfg, svelte_dir))
         }
         Commands::Benchmark { ops } => benchmark(ops),
         Commands::Init { path } => {
@@ -72,7 +73,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn serve(cfg: config::Config) -> anyhow::Result<()> {
+async fn serve(cfg: config::Config, svelte_dir: Option<PathBuf>) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
     tracing::info!("║  NAWA Web Operating System v0.1.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
@@ -113,8 +114,35 @@ async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     let ws_connections = realtime::ConnectionManager::new();
     tracing::info!("✓ Real-time: WebSocket event bus (push, no polling)");
 
+    // SvelteKit integration (optional — loaded if --svelte-dir is provided).
+    let svelte_handler: Option<Arc<nawa_svelte::SvelteHandler>> = if let Some(dir) = svelte_dir.clone() {
+        let manifest_path = dir.join("manifest.json");
+        if manifest_path.exists() {
+            let addr: SocketAddr = cfg.addr.parse().unwrap_or_else(|_| "127.0.0.1:8080".parse().unwrap());
+            let ws_port = addr.port() + 1;
+            let ws_url = format!("ws://localhost:{}", ws_port);
+            match nawa_svelte::SvelteHandler::load(&dir, ws_url) {
+                Ok(h) => {
+                    tracing::info!("✓ SvelteKit: '{}' — {} routes (no Node.js at runtime)",
+                        h.manifest.app_name, h.route_count());
+                    Some(h)
+                }
+                Err(e) => {
+                    tracing::warn!("⚠ SvelteKit load failed: {e}");
+                    None
+                }
+            }
+        } else {
+            tracing::info!("✓ SvelteKit: dir provided but no manifest.json — skipping");
+            None
+        }
+    } else {
+        tracing::info!("✓ SvelteKit: not configured (use --svelte-dir to enable)");
+        None
+    };
+
     let router = build_router(db.clone(), auth.clone(), uring.clone(), sandbox.clone(),
-        metrics.clone(), rate_limiter, static_server, event_bus.clone());
+        metrics.clone(), rate_limiter, static_server, event_bus.clone(), svelte_handler.clone());
     tracing::info!("✓ Router: {} routes", router.len());
 
     let addr: SocketAddr = cfg.addr.parse()?;
@@ -124,7 +152,11 @@ async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     tracing::info!("   WebSocket:  ws://localhost:{}", ws_port);
     tracing::info!("   Register:   http://localhost:{}/register", addr.port());
     tracing::info!("   System:     http://localhost:{}/system", addr.port());
-    tracing::info!("   Metrics:    http://localhost:{}/metrics\n", addr.port());
+    tracing::info!("   Metrics:    http://localhost:{}/metrics", addr.port());
+    if svelte_handler.is_some() {
+        tracing::info!("   SvelteKit:  http://localhost:{}/svelte/", addr.port());
+    }
+    tracing::info!("");
 
     // WebSocket server (separate port, pure push).
     let ws_addr: SocketAddr = format!("{}:{}", addr.ip(), ws_port).parse()?;
@@ -172,6 +204,7 @@ fn build_router(
     metrics: Arc<Metrics>, _rate_limiter: Arc<middleware::RateLimiter>,
     static_server: Arc<middleware::StaticServer>,
     event_bus: Arc<realtime::EventBus>,
+    svelte_handler: Option<Arc<nawa_svelte::SvelteHandler>>,
 ) -> Router {
     let mut router = Router::new();
 
@@ -792,6 +825,119 @@ fn build_router(
         });
     }
 
+    // ═══ SVELTEKIT INTEGRATION ═══
+    // Mounts a SvelteKit app under /svelte/* — no Node.js required at runtime.
+    // The app was pre-compiled by adapter-nawa into _nawa/{manifest.json,pages/,assets/}.
+    if let Some(handler) = svelte_handler {
+        // SvelteKit landing page (lists all routes for discovery).
+        {
+            let h = handler.clone();
+            router.get("/svelte", move |_| {
+                let h = h.clone();
+                async move {
+                    let mut html = String::from(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>NAWA + SvelteKit</title>
+<style>body{font-family:'Noto Sans Arabic',system-ui;background:#0d0c0a;color:#e0e0e0;padding:2rem;line-height:1.8}
+h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th{padding:0.5rem;border-bottom:1px solid #2a2a2a;text-align:right}
+.badge{padding:0.2rem 0.6rem;border-radius:4px;font-size:0.75rem}.ok{background:rgba(16,185,129,0.15);color:#10b981}.warn{background:rgba(245,158,11,0.15);color:#f59e0b}</style>
+</head><body><h1>🦀 NAWA + SvelteKit</h1><p>App: <strong>"#);
+                    html.push_str(&h.manifest.app_name);
+                    html.push_str("</strong> — ");
+                    html.push_str(&h.route_count().to_string());
+                    html.push_str(" routes (no Node.js at runtime)</p><table><tr><th>Pattern</th><th>Methods</th><th>Auth</th><th>Admin</th><th>Type</th></tr>");
+                    for r in h.manifest.iter_routes() {
+                        html.push_str(&format!(
+                            "<tr><td><a href=\"/svelte{}\">{}</a></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                            r.pattern, r.pattern,
+                            r.methods.join(", "),
+                            if r.requires_auth { r#"<span class="badge warn">yes</span>"# } else { "—" },
+                            if r.admin_only { r#"<span class="badge warn">yes</span>"# } else { "—" },
+                            if r.is_endpoint { "endpoint" } else if r.prerendered_html.is_some() { "prerendered" } else { "spa" }
+                        ));
+                    }
+                    html.push_str("</table><p><a href=\"/\">← Back to NAWA</a></p></body></html>");
+                    let mut r = Response::text(html);
+                    r.header("Content-Type", "text/html; charset=utf-8");
+                    middleware::add_security_headers(&mut r);
+                    r
+                }
+            });
+        }
+
+        // SvelteKit catch-all route: /svelte/* → dispatch to handler.
+        {
+            let h = handler.clone();
+            let auth_clone = auth.clone();
+            let db_clone = db.clone();
+            router.get("/svelte/:path", move |req| {
+                let h = h.clone();
+                let auth = auth_clone.clone();
+                let db = db_clone.clone();
+                async move {
+                    let path = req.param("path").unwrap_or("").to_string();
+                    let full_path = format!("/{}", path);
+
+                    // Extract auth token from cookie.
+                    let token = req.header("cookie")
+                        .and_then(|c| middleware::extract_cookie_value(c, "nawa_token"));
+                    let user = if let Some(t) = &token {
+                        auth.verify_token(t).ok()
+                            .and_then(|claims| auth.get_user(&claims.sub).ok())
+                            .and_then(|u| serde_json::to_value(&u).ok())
+                    } else {
+                        None
+                    };
+
+                    // Build initial state from NAWA-DB (top 10 keys for the demo).
+                    let keys: Vec<_> = db.scan_prefix("", 10).into_iter()
+                        .map(|(k, v)| {
+                            (String::from_utf8_lossy(k).to_string(), v.display())
+                        })
+                        .collect();
+                    let initial_state = serde_json::json!({
+                        "db_keys": keys,
+                        "db_size": db.len(),
+                        "auth": { "logged_in": token.is_some() }
+                    });
+
+                    // Parse query string.
+                    let query = req.query.clone().into_iter().collect();
+
+                    let page = h.handle(&full_path, query, token.as_deref(), user, initial_state);
+                    let mut r = Response::text(String::from_utf8_lossy(&page.html).to_string());
+                    r.status = StatusCode(page.status);
+                    r.header("Content-Type", page.content_type);
+                    for (k, v) in page.headers {
+                        r.header(&k, &v);
+                    }
+                    middleware::add_security_headers(&mut r);
+                    r
+                }
+            });
+        }
+
+        // SvelteKit static assets: /svelte/_assets/* → serve from _nawa/assets/.
+        {
+            let h = handler.clone();
+            router.get("/svelte/_assets/:path", move |req| {
+                let h = h.clone();
+                async move {
+                    let asset_path = req.param("path").unwrap_or("");
+                    match h.serve_asset(asset_path) {
+                        Some((bytes, content_type)) => {
+                            let mut r = Response::ok(bytes);
+                            r.header("Content-Type", content_type);
+                            r.header("Cache-Control", "public, max-age=86400");
+                            r
+                        }
+                        None => Response::not_found("asset not found"),
+                    }
+                }
+            });
+        }
+
+        tracing::debug!("✓ SvelteKit routes mounted under /svelte/*");
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -805,7 +951,8 @@ fn build_router(
                 "GET /notifications/stats","GET /:key","POST /:key","DELETE /:key","GET /scan/:prefix",
                 "POST /auth/register","POST /auth/login","GET /auth/me","GET /auth/users",
                 "GET /password-reset","POST /password-reset",
-                "GET /backup","POST /restore","GET /static/:path","GET /api"
+                "GET /backup","POST /restore","GET /static/:path","GET /api",
+                "GET /svelte","GET /svelte/:path","GET /svelte/_assets/:path"
             ]
         }))
     });

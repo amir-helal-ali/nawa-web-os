@@ -1,0 +1,20 @@
+[package]
+name = "nawa-svelte"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA-SvelteKit integration — embed SvelteKit apps in NAWA binary (no Node.js at runtime)"
+
+[dependencies]
+nawa-db = { path = "../nawa-db" }
+nawa-engine = { path = "../nawa-engine" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"

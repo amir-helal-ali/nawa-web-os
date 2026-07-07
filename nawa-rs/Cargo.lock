@@ -1517,6 +1517,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nawa-svelte"
+version = "0.1.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "nawa-db",
+ "nawa-engine",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "nawa-uring"
 version = "0.1.0-alpha"
 dependencies = [

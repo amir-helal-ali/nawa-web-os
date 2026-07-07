@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>NAWA + SvelteKit</title>
+<meta name="description" content="SvelteKit app embedded in a Rust binary — no Node.js at runtime">
+<link rel="stylesheet" href="/_nawa/assets/app.css">
+<link rel="icon" href="/_nawa/assets/favicon.svg">
+</head>
+<body>
+<nav class="nawa-nav">
+  <a href="/" class="brand">🦀 NAWA + SvelteKit</a>
+  <div class="links">
+    <a href="/">الرئيسية</a>
+    <a href="/about">حول</a>
+    <a href="/dashboard">لوحة التحكم</a>
+    <a href="/blog/hello-world">المدونة</a>
+    <a href="/admin">الإدارة</a>
+  </div>
+</nav>
+
+<main class="container">
+  <section class="hero">
+    <h1>🚀 NAWA + SvelteKit</h1>
+    <p class="tagline">نظام تشغيل الويب الثوري — مع SvelteKit مُدمج بالكامل</p>
+    <div class="features">
+      <div class="feature">
+        <span class="icon">🦀</span>
+        <h3>Rust Binary</h3>
+        <p>binary واحد خالص — لا Node.js في الإنتاج</p>
+      </div>
+      <div class="feature">
+        <span class="icon">⚡</span>
+        <h3>Zero-Copy</h3>
+        <p>HTML يُخدم مباشرة من الذاكرة بدون نسخ</p>
+      </div>
+      <div class="feature">
+        <span class="icon">🔌</span>
+        <h3>WebSocket حي</h3>
+        <p>إشعارات لحظية — لا polling أبداً</p>
+      </div>
+      <div class="feature">
+        <span class="icon">💾</span>
+        <h3>NAWA-DB</h3>
+        <p>قاعدة بيانات مدمجة (LSM + WAL + Bloom)</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>كيف يعمل الدمج؟</h2>
+    <ol>
+      <li><strong>Build-time</strong>: SvelteKit يُجمَّع عبر <code>adapter-nawa</code></li>
+      <li><strong>الناتج</strong>: <code>_nawa/</code> directory يحوي manifest + HTML + JS/CSS</li>
+      <li><strong>Runtime</strong>: <code>nawad</code> يقرأ manifest ويُخدم الصفحات</li>
+      <li><strong>Hydration</strong>: المتصفح يُفعّل SvelteKit client-side</li>
+      <li><strong>Live updates</strong>: WebSocket يدفع التحديثات فوراً</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>الإحصائيات المباشرة</h2>
+    <div id="stats" class="stats">
+      <div class="stat">
+        <div class="value" id="stat-keys">—</div>
+        <div class="label">Keys in DB</div>
+      </div>
+      <div class="stat">
+        <div class="value" id="stat-users">—</div>
+        <div class="label">Users</div>
+      </div>
+      <div class="stat">
+        <div class="value" id="stat-ws">🔴</div>
+        <div class="label">WebSocket</div>
+      </div>
+    </div>
+    <p class="hint">هذه القيم تتحدث لحظياً عبر WebSocket — بدون polling.</p>
+  </section>
+
+  <section class="card">
+    <h2>الإشعارات اللحظية</h2>
+    <div id="notifications"></div>
+  </section>
+</main>
+
+<footer>
+  <p>NAWA Web Operating System v0.1.0-alpha — <a href="https://github.com/amir-helal-ali/nawa-web-os">GitHub</a></p>
+</footer>
+
+<script>
+// This script would normally be the SvelteKit hydration chunk.
+// For the demo, we just listen for NAWA events.
+window.addEventListener('nawa:notification', (e) => {
+  const notif = e.detail;
+  const container = document.getElementById('notifications');
+  const div = document.createElement('div');
+  div.className = 'notification';
+  div.innerHTML = '<strong>' + notif.event + '</strong>: ' + JSON.stringify(notif.data);
+  container.prepend(div);
+  setTimeout(() => div.remove(), 10000);
+});
+
+// Update stats when 'stats' notification arrives.
+window.addEventListener('nawa:notification', (e) => {
+  if (e.detail.event === 'connected') {
+    document.getElementById('stat-ws').textContent = '🟢';
+  }
+});
+
+// Send 'stats' command to get live counts.
+if (window.__NAWA__?.ws) {
+  window.__NAWA__.ws.addEventListener('open', () => {
+    document.getElementById('stat-ws').textContent = '🟢';
+    window.__NAWA__.ws.send('stats');
+  });
+  window.__NAWA__.ws.addEventListener('message', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (d.connections !== undefined) {
+        document.getElementById('stat-keys').textContent = d.connections;
+      }
+    } catch (e) {}
+  });
+}
+</script>
+</body>
+</html>
