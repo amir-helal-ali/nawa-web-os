@@ -88,7 +88,7 @@ pub fn render_dashboard(db: &DbEngine, auth: &AuthStore, uring: &NawaUring, curr
     };
 
     format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>NAWA — نظام تشغيل الويب</title><style>{CSS}</style></head><body>
-<nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a><div class="nawa-nav-links"><a href="/">Dashboard</a><a href="/ssr">SSR</a><a href="/health">Health</a><a href="/metrics">Metrics</a><a href="/api">API</a>{auth_links}</div></nav>
+<nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a><div class="nawa-nav-links"><a href="/">Dashboard</a><a href="/ssr">SSR</a><a href="/system">System</a><a href="/metrics">Metrics</a><a href="/api">API</a>{auth_links}</div></nav>
 <div class="nawa-container nawa-fade-in">
 {welcome_html}
 {users_table}
@@ -99,11 +99,15 @@ pub fn render_dashboard(db: &DbEngine, auth: &AuthStore, uring: &NawaUring, curr
 <div class="nawa-stat"><div class="nawa-stat-val">io_uring</div><div class="nawa-stat-label">Zero-copy</div></div>
 <div class="nawa-stat"><div class="nawa-stat-val">WASM</div><div class="nawa-stat-label">Plugins</div></div>
 <div class="nawa-stat"><div class="nawa-stat-val">JWT</div><div class="nawa-stat-label">Auth+RBAC</div></div>
-<div class="nawa-stat"><div class="nawa-stat-val">9 MB</div><div class="nawa-stat-label">Binary</div></div>
+<div class="nawa-stat"><div class="nawa-stat-val">WS</div><div class="nawa-stat-label">Real-time</div></div>
 </div></div>
 <footer><p>© 2026 NAWA · <a href="https://github.com/amir-helal-ali/nawa-web-os">GitHub</a></p></footer>
-</div></body></html>"#,
-        auth_links = auth_links, welcome_html = welcome_html, users_table = users_table, db_table = db_table)
+<div id="nawa-notifications" style="position:fixed;bottom:1rem;left:1rem;z-index:9999;display:flex;flex-direction:column;gap:0.5rem"></div>
+</div>
+<script>{WS_JS}</script>
+</body></html>"#,
+        auth_links = auth_links, welcome_html = welcome_html, users_table = users_table, db_table = db_table,
+        WS_JS = WS_CLIENT_JS)
 }
 
 /// Render registration page.
@@ -155,6 +159,51 @@ pub fn render_password_reset() -> String {
 pub fn render_password_reset_confirm(email: &str) -> String {
     format!(r#"<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>رمز الاستعادة — NAWA</title><style>{CSS}</style></head><body><nav class="nawa-nav"><a class="nawa-nav-brand" href="/">🦀 NAWA</a></nav><div class="nawa-container"><div class="nawa-card nawa-fade-in"><h1>✅ تم إرسال الرمز</h1><p style="color:#888;margin-bottom:1rem">تم إرسال رمز الاستعادة إلى <strong>{email}</strong>.</p><p style="color:var(--nawa-text-muted);font-size:0.9rem">في النظام الحقيقي، سيُرسل الرمز عبر البريد. في النواة الحالية، استخدم الـ API:</p><code style="display:block;padding:1rem;margin:1rem 0;background:var(--nawa-bg);border-radius:8px">POST /auth/reset-password&#10;{{"email":"{email}","new_password":"..."}}</code><a href="/login" class="nawa-btn nawa-btn-primary">العودة لتسجيل الدخول</a></div></div></body></html>"#, email = email)
 }
+
+/// WebSocket client JS — real-time push notifications (NO polling).
+const WS_CLIENT_JS: &str = r#"
+(function(){
+    var wsPort = parseInt(window.location.port || "8080") + 1;
+    var wsUrl = "ws://" + window.location.hostname + ":" + wsPort;
+    var container = document.getElementById("nawa-notifications");
+    var reconnectDelay = 1000;
+    function connect(){
+        var ws = new WebSocket(wsUrl);
+        ws.onopen = function(){ reconnectDelay=1000; showNotif("🟢","WebSocket connected","ok"); };
+        ws.onmessage = function(ev){
+            try{ var d=JSON.parse(ev.data); handleNotif(d); }catch(e){}
+        };
+        ws.onclose = function(){
+            setTimeout(connect, reconnectDelay);
+            reconnectDelay = Math.min(reconnectDelay*2, 10000);
+        };
+        ws.onerror = function(){ ws.close(); };
+    }
+    function handleNotif(d){
+        if(d.event==="connected") return;
+        var icon="📢", cls="info";
+        if(d.event==="user_registered") icon="👤";
+        else if(d.event==="user_login") icon="🔑";
+        else if(d.event==="db_write") icon="💾";
+        else if(d.event==="db_delete") icon="🗑";
+        else if(d.event==="user_verified") icon="✅";
+        else if(d.event==="user_deleted") icon="⚠";
+        else if(d.event==="role_changed") icon="🔄";
+        else if(d.event==="settings_updated") icon="⚙";
+        else if(d.event==="profile_updated") icon="📝";
+        showNotif(icon+" "+d.event, JSON.stringify(d.data), cls);
+    }
+    function showNotif(title, body, cls){
+        var div=document.createElement("div");
+        div.style.cssText="padding:0.8rem 1.2rem;background:var(--nawa-surface);border:1px solid var(--nawa-border);border-radius:8px;color:var(--nawa-text);font-size:0.85rem;max-width:350px;animation:nawa-fade-in 0.3s;box-shadow:0 4px 12px rgba(0,0,0,0.5)";
+        if(cls==="ok") div.style.borderColor="var(--nawa-accent)";
+        div.innerHTML="<strong>"+title+"</strong><br><span style='color:var(--nawa-text-muted);font-size:0.75rem'>"+body+"</span>";
+        container.appendChild(div);
+        setTimeout(function(){ div.style.transition="opacity 0.5s"; div.style.opacity="0"; setTimeout(function(){div.remove();},500); },5000);
+    }
+    connect();
+})();
+"#;
 
 /// NAWA Design System CSS.
 const CSS: &str = r#"

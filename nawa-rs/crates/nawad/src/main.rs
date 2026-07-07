@@ -1,11 +1,13 @@
 //! # nawad — NAWA Web Operating System
 //!
 //! محرك ويب ثوري في binary واحد. لا يحتاج أي شيء خارجي.
+//! لا polling — كل شيء event-driven (WebSocket push).
 
 mod config;
 mod dashboard;
 mod metrics;
 mod middleware;
+mod realtime;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -22,7 +24,6 @@ use nawa_http::{HttpServer, Response, Router, StatusCode};
 use nawa_uring::NawaUring;
 use tracing_subscriber::EnvFilter;
 
-/// NAWA — نظام تشغيل الويب الثوري
 #[derive(Parser, Debug)]
 #[command(name = "nawad", version, about = "NAWA — Revolutionary Web Operating System")]
 struct Cli {
@@ -33,22 +34,14 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Serve {
-        #[arg(long)]
-        addr: Option<String>,
-        #[arg(long)]
-        data_dir: Option<PathBuf>,
-        #[arg(long)]
-        plugins_dir: Option<PathBuf>,
-        #[arg(long)]
-        static_dir: Option<PathBuf>,
-        /// Config file path (default: ./nawa.toml).
-        #[arg(long, default_value = "./nawa.toml")]
-        config: PathBuf,
-        #[arg(long)]
-        no_wal_sync: bool,
+        #[arg(long)] addr: Option<String>,
+        #[arg(long)] data_dir: Option<PathBuf>,
+        #[arg(long)] plugins_dir: Option<PathBuf>,
+        #[arg(long)] static_dir: Option<PathBuf>,
+        #[arg(long, default_value = "./nawa.toml")] config: PathBuf,
+        #[arg(long)] no_wal_sync: bool,
     },
     Benchmark { #[arg(short, long, default_value = "100000")] ops: u32 },
-    /// Generate a default config file.
     Init { #[arg(long, default_value = "./nawa.toml")] path: PathBuf },
     Info,
 }
@@ -58,29 +51,25 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
     let cli = Cli::parse();
-    let result: anyhow::Result<()> = match cli.command {
-        Commands::Serve { addr, data_dir, plugins_dir, static_dir, config: config_path, no_wal_sync } => {
-            // Load config file.
-            let mut cfg = config::Config::load(&config_path);
-            // CLI args override config file.
+    match cli.command {
+        Commands::Serve { addr, data_dir, plugins_dir, static_dir, config: cfg_path, no_wal_sync } => {
+            let mut cfg = config::Config::load(&cfg_path);
             if let Some(a) = addr { cfg.addr = a; }
             if let Some(d) = data_dir { cfg.data_dir = d.display().to_string(); }
             if let Some(p) = plugins_dir { cfg.plugins_dir = p.display().to_string(); }
             if let Some(s) = static_dir { cfg.static_dir = s.display().to_string(); }
             if no_wal_sync { cfg.wal_sync = false; }
-
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve(cfg))
         }
         Commands::Benchmark { ops } => benchmark(ops),
         Commands::Init { path } => {
             config::Config::generate_default(&path)?;
-            println!("✓ Config file generated: {}", path.display());
+            println!("✓ Config generated: {}", path.display());
             Ok(())
         }
         Commands::Info => { print_info(); Ok(()) }
-    };
-    result
+    }
 }
 
 async fn serve(cfg: config::Config) -> anyhow::Result<()> {
@@ -92,10 +81,9 @@ async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     let data_dir = PathBuf::from(&cfg.data_dir);
     let plugins_dir = PathBuf::from(&cfg.plugins_dir);
     let static_dir = PathBuf::from(&cfg.static_dir);
-    let wal_sync = cfg.wal_sync;
 
     let db = Arc::new(DbEngine::open(nawa_db::DbConfig {
-        data_dir: data_dir.clone(), memtable_max_size: 4 * 1024 * 1024, wal_sync,
+        data_dir: data_dir.clone(), memtable_max_size: 4 * 1024 * 1024, wal_sync: cfg.wal_sync,
     })?);
     tracing::info!("✓ NAWA-DB: {} keys", db.len());
 
@@ -109,50 +97,68 @@ async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     if plugins_dir.exists() {
         let mut sb = sandbox.lock().await;
         match sb.load_from_dir(&plugins_dir) {
-            Ok(n) => tracing::info!("✓ WASM: {} plugins from {}", n, plugins_dir.display()),
+            Ok(n) => tracing::info!("✓ WASM: {} plugins", n),
             Err(e) => tracing::warn!("⚠ WASM: {e}"),
         }
     } else {
-        tracing::info!("✓ WASM: ready ({} not found)", plugins_dir.display());
+        tracing::info!("✓ WASM: ready (no plugins dir)");
     }
 
     let metrics = Arc::new(Metrics::new());
-    let rate_limiter = Arc::new(middleware::RateLimiter::new(100, Duration::from_secs(60)));
+    let rate_limiter = Arc::new(middleware::RateLimiter::new(cfg.rate_limit, Duration::from_secs(60)));
     let static_server = Arc::new(middleware::StaticServer::new(&static_dir));
-    tracing::info!("✓ Rate limiter: 100 req/min");
-    tracing::info!("✓ Static files: {}", static_dir.display());
 
-    let router = build_router(db, auth, uring, sandbox, metrics, rate_limiter, static_server);
+    // Real-time Event Bus — pure push, NO polling.
+    let event_bus = realtime::EventBus::new(256);
+    let ws_connections = realtime::ConnectionManager::new();
+    tracing::info!("✓ Real-time: WebSocket event bus (push, no polling)");
+
+    let router = build_router(db.clone(), auth.clone(), uring.clone(), sandbox.clone(),
+        metrics.clone(), rate_limiter, static_server, event_bus.clone());
     tracing::info!("✓ Router: {} routes", router.len());
 
     let addr: SocketAddr = cfg.addr.parse()?;
+    let ws_port = addr.port() + 1;
     tracing::info!("\n🚀 NAWA on http://{}", addr);
-    tracing::info!("   Dashboard: http://localhost:{}", addr.port());
-    tracing::info!("   Register:  http://localhost:{}/register", addr.port());
-    tracing::info!("   System:    http://localhost:{}/system", addr.port());
-    tracing::info!("   Metrics:   http://localhost:{}/metrics", addr.port());
-    tracing::info!("\n   Press Ctrl+C to stop\n");
+    tracing::info!("   Dashboard:  http://localhost:{}", addr.port());
+    tracing::info!("   WebSocket:  ws://localhost:{}", ws_port);
+    tracing::info!("   Register:   http://localhost:{}/register", addr.port());
+    tracing::info!("   System:     http://localhost:{}/system", addr.port());
+    tracing::info!("   Metrics:    http://localhost:{}/metrics\n", addr.port());
 
-    // Graceful shutdown: listen for SIGTERM/SIGINT.
-    let server = HttpServer::new(router, addr);
-
-    // Use tokio::select to handle shutdown signal.
-    tokio::select! {
-        result = server.serve() => {
-            if let Err(e) = result {
-                tracing::error!("Server error: {e}");
+    // WebSocket server (separate port, pure push).
+    let ws_addr: SocketAddr = format!("{}:{}", addr.ip(), ws_port).parse()?;
+    let ws_bus = event_bus.clone();
+    let ws_conns = ws_connections.clone();
+    tokio::spawn(async move {
+        let listener = match tokio::net::TcpListener::bind(ws_addr).await {
+            Ok(l) => l,
+            Err(e) => { tracing::warn!("WS bind failed: {e}"); return; }
+        };
+        tracing::info!("✓ WebSocket server on port {}", ws_port);
+        loop {
+            if let Ok((stream, _)) = listener.accept().await {
+                let bus = ws_bus.clone();
+                let conns = ws_conns.clone();
+                tokio::spawn(async move { realtime::handle_websocket(stream, bus, conns).await; });
             }
         }
+    });
+
+    // HTTP server with graceful shutdown.
+    let server = HttpServer::new(router, addr);
+    tokio::select! {
+        result = server.serve() => {
+            if let Err(e) = result { tracing::error!("Server error: {e}"); }
+        }
         _ = tokio::signal::ctrl_c() => {
-            tracing::info!("\n⚠ Received Ctrl+C — shutting down gracefully...");
+            tracing::info!("\n⚠ Ctrl+C — shutting down...");
         }
     }
-
-    tracing::info!("✓ NAWA stopped. Goodbye!");
+    tracing::info!("✓ NAWA stopped.");
     Ok(())
 }
 
-/// Extract current user from request cookie.
 fn get_current_user(req: &nawa_http::Request, auth: &AuthStore) -> Option<User> {
     let cookie = req.header("cookie")?;
     let token = middleware::extract_cookie_value(cookie, "nawa_token")?;
@@ -165,325 +171,611 @@ fn build_router(
     sandbox: Arc<tokio::sync::Mutex<nawa_wasm::Sandbox>>,
     metrics: Arc<Metrics>, _rate_limiter: Arc<middleware::RateLimiter>,
     static_server: Arc<middleware::StaticServer>,
+    event_bus: Arc<realtime::EventBus>,
 ) -> Router {
     let mut router = Router::new();
 
-    // ═══ PAGES ═══
-    // GET / — Dashboard
+    // ═══ DASHBOARD ═══
     {
-        let db = db.clone(); let auth = auth.clone(); let uring = uring.clone();
+        let db = db.clone();
+        let auth = auth.clone();
+        let uring = uring.clone();
         router.get("/", move |req| {
-            let db = db.clone(); let auth = auth.clone(); let uring = uring.clone();
+            let db = db.clone();
+            let auth = auth.clone();
+            let uring = uring.clone();
             async move {
-                let current_user = get_current_user(&req, &auth);
-                let html = dashboard::render_dashboard(&db, &auth, &uring, current_user.as_ref());
-                let mut resp = Response::text(html);
-                resp.header("Content-Type", "text/html; charset=utf-8");
-                middleware::add_security_headers(&mut resp);
-                resp
+                let user = get_current_user(&req, &auth);
+                let html = dashboard::render_dashboard(&db, &auth, &uring, user.as_ref());
+                let mut r = Response::text(html);
+                r.header("Content-Type", "text/html; charset=utf-8");
+                middleware::add_security_headers(&mut r);
+                r
             }
         });
     }
 
-    // GET /register
-    { router.get("/register", move |_| async {
-        let html = dashboard::render_register();
-        let mut resp = Response::text(html);
-        resp.header("Content-Type", "text/html; charset=utf-8");
-        middleware::add_security_headers(&mut resp);
-        resp
-    }); }
+    // ═══ AUTH PAGES ═══
+    router.get("/register", move |_| async {
+        let mut r = Response::text(dashboard::render_register());
+        r.header("Content-Type", "text/html; charset=utf-8");
+        r
+    });
 
-    // POST /register
-    { let auth = auth.clone();
-    router.post("/register", move |req| {
+    {
         let auth = auth.clone();
-        async move {
-            let form = parse_form(req.body_str());
-            match auth.register(
-                form.get("username").map(|s| s.as_str()).unwrap_or(""),
-                form.get("email").map(|s| s.as_str()).unwrap_or(""),
-                form.get("password").map(|s| s.as_str()).unwrap_or(""),
-            ) {
-                Ok(result) => {
-                    let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head><body>Redirecting...</body></html>"#);
-                    resp.header("Content-Type", "text/html");
-                    resp.header("Set-Cookie", &format!("nawa_token={}; Path=/; HttpOnly; Max-Age={}", result.token, result.expires_in));
-                    middleware::add_security_headers(&mut resp);
-                    resp
-                }
-                Err(e) => {
-                    let mut resp = Response::text(dashboard::render_error(&e.to_string(), "/register"));
-                    resp.header("Content-Type", "text/html; charset=utf-8");
-                    resp
-                }
-            }
-        }
-    }); }
-
-    // GET /login
-    { router.get("/login", move |_| async {
-        let html = dashboard::render_login();
-        let mut resp = Response::text(html);
-        resp.header("Content-Type", "text/html; charset=utf-8");
-        middleware::add_security_headers(&mut resp);
-        resp
-    }); }
-
-    // POST /login
-    { let auth = auth.clone();
-    router.post("/login", move |req| {
-        let auth = auth.clone();
-        async move {
-            let form = parse_form(req.body_str());
-            match auth.login(
-                form.get("email").map(|s| s.as_str()).unwrap_or(""),
-                form.get("password").map(|s| s.as_str()).unwrap_or(""),
-            ) {
-                Ok(result) => {
-                    let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#);
-                    resp.header("Content-Type", "text/html");
-                    resp.header("Set-Cookie", &format!("nawa_token={}; Path=/; HttpOnly; Max-Age={}", result.token, result.expires_in));
-                    resp
-                }
-                Err(e) => Response::text(dashboard::render_error(&e.to_string(), "/login")),
-            }
-        }
-    }); }
-
-    // GET /logout
-    { router.get("/logout", move |_| async {
-        let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head><body>Logging out...</body></html>"#);
-        resp.header("Content-Type", "text/html");
-        resp.header("Set-Cookie", "nawa_token=; Path=/; HttpOnly; Max-Age=0");
-        resp
-    }); }
-
-    // GET /settings (admin only)
-    { let auth = auth.clone();
-    router.get("/settings", move |req| {
-        let auth = auth.clone();
-        async move {
-            let user = get_current_user(&req, &auth);
-            match user {
-                Some(u) if u.role == "admin" => {
-                    let html = dashboard::render_settings(&auth, &u);
-                    let mut resp = Response::text(html);
-                    resp.header("Content-Type", "text/html; charset=utf-8");
-                    resp
-                }
-                Some(_) => Response::text(dashboard::render_error("صلاحية الأدمن مطلوبة", "/")),
-                None => {
-                    let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
-                    resp.header("Content-Type", "text/html");
-                    resp
-                }
-            }
-        }
-    }); }
-
-    // POST /settings (admin only)
-    { let auth = auth.clone();
-    router.post("/settings", move |req| {
-        let auth = auth.clone();
-        async move {
-            let user = get_current_user(&req, &auth);
-            match user {
-                Some(u) if u.role == "admin" => {
-                    let form = parse_form(req.body_str());
-                    let mut settings = auth.get_settings().unwrap_or_default();
-                    settings.project_name = form.get("project_name").cloned().unwrap_or_default();
-                    settings.registration_open = form.contains_key("registration_open");
-                    settings.verification_required = form.contains_key("verification_required");
-                    settings.max_users = form.get("max_users").and_then(|s| s.parse().ok());
-                    if let Some(expiry) = form.get("jwt_expiry_secs").and_then(|s| s.parse::<u64>().ok()) {
-                        settings.jwt_expiry_secs = expiry;
+        let _eb = event_bus.clone();
+        router.post("/register", move |req| {
+            let auth = auth.clone();
+            let eb = _eb.clone();
+            async move {
+                let form = parse_form(req.body_str());
+                match auth.register(
+                    form.get("username").map(|s| s.as_str()).unwrap_or(""),
+                    form.get("email").map(|s| s.as_str()).unwrap_or(""),
+                    form.get("password").map(|s| s.as_str()).unwrap_or(""),
+                ) {
+                    Ok(result) => {
+                        eb.publish(realtime::Notification::new("user_registered", serde_json::json!({
+                            "username": result.user.username, "role": result.user.role
+                        })));
+                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#);
+                        r.header("Content-Type", "text/html");
+                        r.header("Set-Cookie", &format!("nawa_token={}; Path=/; HttpOnly; Max-Age={}", result.token, result.expires_in));
+                        r
                     }
-                    let _ = auth.update_settings(&u.id, &settings);
-                    let html = dashboard::render_settings(&auth, &u);
-                    let mut resp = Response::text(html);
-                    resp.header("Content-Type", "text/html; charset=utf-8");
-                    resp
+                    Err(e) => {
+                        let mut r = Response::text(dashboard::render_error(&e.to_string(), "/register"));
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r
+                    }
                 }
-                _ => Response::text(dashboard::render_error("صلاحية الأدمن مطلوبة", "/")),
             }
-        }
-    }); }
+        });
+    }
 
-    // ═══ ADMIN ACTIONS ═══
-    // POST /admin/verify
-    { let auth = auth.clone();
-    router.post("/admin/verify", move |req| {
-        let auth = auth.clone();
-        async move {
-            let user = get_current_user(&req, &auth);
-            if let Some(admin) = user { if admin.role == "admin" {
-                let form = parse_form(req.body_str());
-                if let Some(id) = form.get("user_id") { let _ = auth.verify_user(&admin.id, id); }
-            }}
-            Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#)
-        }
-    }); }
+    router.get("/login", move |_| async {
+        let mut r = Response::text(dashboard::render_login());
+        r.header("Content-Type", "text/html; charset=utf-8");
+        r
+    });
 
-    // POST /admin/role
-    { let auth = auth.clone();
-    router.post("/admin/role", move |req| {
+    {
         let auth = auth.clone();
-        async move {
-            let user = get_current_user(&req, &auth);
-            if let Some(admin) = user { if admin.role == "admin" {
+        let eb = event_bus.clone();
+        router.post("/login", move |req| {
+            let auth = auth.clone();
+            let eb = eb.clone();
+            async move {
                 let form = parse_form(req.body_str());
-                if let (Some(id), Some(role)) = (form.get("user_id"), form.get("role")) {
-                    let _ = auth.change_role(&admin.id, id, role);
+                match auth.login(
+                    form.get("email").map(|s| s.as_str()).unwrap_or(""),
+                    form.get("password").map(|s| s.as_str()).unwrap_or(""),
+                ) {
+                    Ok(result) => {
+                        eb.publish(realtime::Notification::new("user_login", serde_json::json!({
+                            "username": result.user.username
+                        })));
+                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#);
+                        r.header("Content-Type", "text/html");
+                        r.header("Set-Cookie", &format!("nawa_token={}; Path=/; HttpOnly; Max-Age={}", result.token, result.expires_in));
+                        r
+                    }
+                    Err(e) => {
+                        let mut r = Response::text(dashboard::render_error(&e.to_string(), "/login"));
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r
+                    }
                 }
-            }}
-            Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#)
-        }
-    }); }
+            }
+        });
+    }
 
-    // POST /admin/delete
-    { let auth = auth.clone();
-    router.post("/admin/delete", move |req| {
+    router.get("/logout", move |_| async {
+        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#);
+        r.header("Content-Type", "text/html");
+        r.header("Set-Cookie", "nawa_token=; Path=/; HttpOnly; Max-Age=0");
+        r
+    });
+
+    // ═══ PROFILE ═══
+    {
         let auth = auth.clone();
-        async move {
-            let user = get_current_user(&req, &auth);
-            if let Some(admin) = user { if admin.role == "admin" {
-                let form = parse_form(req.body_str());
-                if let Some(id) = form.get("user_id") { let _ = auth.delete_user(&admin.id, id); }
-            }}
-            Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#)
-        }
-    }); }
+        router.get("/profile", move |req| {
+            let auth = auth.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(user) => {
+                        let mut r = Response::text(dashboard::render_profile(&user));
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r
+                    }
+                    None => {
+                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
+                        r.header("Content-Type", "text/html");
+                        r
+                    }
+                }
+            }
+        });
+    }
 
-    // ═══ SSR ENGINE ═══
-    { let db = db.clone();
-    router.get("/ssr", move |_| {
+    {
+        let auth = auth.clone();
         let db = db.clone();
-        async move {
-            let ctx = EngineContext::new(db);
-            let result = UnifiedEngine::render_db_page(&ctx, "NAWA SSR");
-            let mut resp = Response::text(String::from_utf8_lossy(&result.html).to_string());
-            resp.header("Content-Type", result.content_type);
-            resp
-        }
-    }); }
+        let eb = event_bus.clone();
+        router.post("/profile", move |req| {
+            let auth = auth.clone();
+            let db = db.clone();
+            let eb = eb.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(user) => {
+                        let form = parse_form(req.body_str());
+                        let mut updated = user.clone();
+                        if let Some(u) = form.get("username") { updated.username = u.clone(); }
+                        if let Some(e) = form.get("email") {
+                            let _ = db.delete(&format!("user:email:{}", user.email));
+                            let _ = db.put(&format!("user:email:{}", e), Value::from_str(&user.id));
+                            updated.email = e.clone();
+                        }
+                        if let Some(p) = form.get("new_password") {
+                            if !p.is_empty() { updated.password_hash = nawa_auth::password::hash_password(p); }
+                        }
+                        let json = serde_json::to_string(&updated).unwrap_or_default();
+                        let _ = db.put(format!("user:{}", user.id), Value::from_json_str(&json).unwrap_or_else(|_| Value::Bytes(json.into_bytes())));
+                        eb.publish(realtime::Notification::new("profile_updated", serde_json::json!({"username": updated.username})));
+                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/profile"></head><body>تم الحفظ</body></html>"#);
+                        r.header("Content-Type", "text/html");
+                        r
+                    }
+                    None => Response::new(StatusCode(401)),
+                }
+            }
+        });
+    }
+
+    // ═══ ADMIN ═══
+    {
+        let auth = auth.clone();
+        router.get("/settings", move |req| {
+            let auth = auth.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(u) if u.role == "admin" => {
+                        let mut r = Response::text(dashboard::render_settings(&auth, &u));
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r
+                    }
+                    Some(_) => {
+                        let mut r = Response::text(dashboard::render_error("صلاحية الأدمن مطلوبة", "/"));
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r
+                    }
+                    None => {
+                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
+                        r.header("Content-Type", "text/html");
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        let eb = event_bus.clone();
+        router.post("/settings", move |req| {
+            let auth = auth.clone();
+            let eb = eb.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(u) if u.role == "admin" => {
+                        let form = parse_form(req.body_str());
+                        let mut s = auth.get_settings().unwrap_or_default();
+                        s.project_name = form.get("project_name").cloned().unwrap_or_default();
+                        s.registration_open = form.contains_key("registration_open");
+                        s.verification_required = form.contains_key("verification_required");
+                        s.max_users = form.get("max_users").and_then(|v| v.parse().ok());
+                        if let Some(e) = form.get("jwt_expiry_secs").and_then(|v| v.parse::<u64>().ok()) { s.jwt_expiry_secs = e; }
+                        let _ = auth.update_settings(&u.id, &s);
+                        eb.publish(realtime::Notification::new("settings_updated", serde_json::json!({"project": s.project_name})));
+                        let mut r = Response::text(dashboard::render_settings(&auth, &u));
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r
+                    }
+                    _ => {
+                        let mut r = Response::new(StatusCode(403));
+                        r.body = b"admin required".to_vec();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        let eb = event_bus.clone();
+        router.post("/admin/verify", move |req| {
+            let auth = auth.clone();
+            let eb = eb.clone();
+            async move {
+                if let Some(admin) = get_current_user(&req, &auth) {
+                    if admin.role == "admin" {
+                        let form = parse_form(req.body_str());
+                        if let Some(id) = form.get("user_id") {
+                            let _ = auth.verify_user(&admin.id, id);
+                            eb.publish(realtime::Notification::new("user_verified", serde_json::json!({"user_id": id})));
+                        }
+                    }
+                }
+                Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#)
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        let eb = event_bus.clone();
+        router.post("/admin/role", move |req| {
+            let auth = auth.clone();
+            let eb = eb.clone();
+            async move {
+                if let Some(admin) = get_current_user(&req, &auth) {
+                    if admin.role == "admin" {
+                        let form = parse_form(req.body_str());
+                        if let (Some(id), Some(role)) = (form.get("user_id"), form.get("role")) {
+                            let _ = auth.change_role(&admin.id, id, role);
+                            eb.publish(realtime::Notification::new("role_changed", serde_json::json!({"user_id": id, "new_role": role})));
+                        }
+                    }
+                }
+                Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#)
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        let eb = event_bus.clone();
+        router.post("/admin/delete", move |req| {
+            let auth = auth.clone();
+            let eb = eb.clone();
+            async move {
+                if let Some(admin) = get_current_user(&req, &auth) {
+                    if admin.role == "admin" {
+                        let form = parse_form(req.body_str());
+                        if let Some(id) = form.get("user_id") {
+                            let _ = auth.delete_user(&admin.id, id);
+                            eb.publish(realtime::Notification::new("user_deleted", serde_json::json!({"user_id": id})));
+                        }
+                    }
+                }
+                Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>"#)
+            }
+        });
+    }
 
     // ═══ SYSTEM ═══
-    { let db = db.clone();
-    router.get("/health", move |_| { let db = db.clone(); async move {
-        let s = db.stats();
-        Response::json(&serde_json::json!({"status":"ok","keys":db.len(),"memtable_bytes":db.memtable_size(),
-            "stats":{"puts":s.puts,"gets":s.gets,"deletes":s.deletes,"scans":s.scans,"flushes":s.memtable_flushes}}))
-    }}); }
+    {
+        let db = db.clone();
+        let auth = auth.clone();
+        let uring = uring.clone();
+        router.get("/system", move |_| {
+            let db = db.clone();
+            let auth = auth.clone();
+            let uring = uring.clone();
+            async move {
+                let mut r = Response::text(dashboard::render_system(&db, &auth, &uring));
+                r.header("Content-Type", "text/html; charset=utf-8");
+                r
+            }
+        });
+    }
 
-    { let uring = uring.clone();
-    router.get("/uring", move |_| { let uring = uring.clone(); async move {
-        let s = uring.stats();
-        Response::json(&serde_json::json!({"real_uring":uring.is_real_uring(),"sqpoll":uring.is_sqpoll_enabled(),
-            "entries":uring.config().entries,"stats":{"submitted":s.submitted,"completed":s.completed,"in_flight":s.in_flight,"errors":s.errors}}))
-    }}); }
+    {
+        let db = db.clone();
+        router.get("/ssr", move |_| {
+            let db = db.clone();
+            async move {
+                let ctx = EngineContext::new(db);
+                let result = UnifiedEngine::render_db_page(&ctx, "NAWA SSR");
+                let mut r = Response::text(String::from_utf8_lossy(&result.html).to_string());
+                r.header("Content-Type", result.content_type);
+                r
+            }
+        });
+    }
 
-    { let metrics = metrics.clone(); let db = db.clone(); let uring = uring.clone();
-    router.get("/metrics", move |_| { let m = metrics.clone(); let db = db.clone(); let uring = uring.clone(); async move {
-        let ds = db.stats(); m.update_db_stats(&ds); m.update_db_gauges(db.len(), db.memtable_size());
-        let us = uring.stats(); m.update_uring_stats(&us);
-        let mut resp = Response::text(m.render());
-        resp.header("Content-Type", "text/plain; version=0.0.4");
-        resp
-    }}); }
+    {
+        let db = db.clone();
+        router.get("/health", move |_| {
+            let db = db.clone();
+            async move {
+                let s = db.stats();
+                Response::json(&serde_json::json!({
+                    "status":"ok","keys":db.len(),"memtable_bytes":db.memtable_size(),
+                    "stats":{"puts":s.puts,"gets":s.gets,"deletes":s.deletes,"scans":s.scans,"flushes":s.memtable_flushes}
+                }))
+            }
+        });
+    }
 
-    { let sandbox = sandbox.clone();
-    router.get("/plugins", move |_| { let sb = sandbox.clone(); async move {
-        let sb = sb.lock().await;
-        Response::json(&serde_json::json!({"count":sb.list().len(),"plugins":sb.list()}))
-    }}); }
+    {
+        let uring = uring.clone();
+        router.get("/uring", move |_| {
+            let uring = uring.clone();
+            async move {
+                let s = uring.stats();
+                Response::json(&serde_json::json!({
+                    "real_uring":uring.is_real_uring(),"sqpoll":uring.is_sqpoll_enabled(),
+                    "entries":uring.config().entries,
+                    "stats":{"submitted":s.submitted,"completed":s.completed,"in_flight":s.in_flight,"errors":s.errors}
+                }))
+            }
+        });
+    }
+
+    {
+        let metrics = metrics.clone();
+        let db = db.clone();
+        let uring = uring.clone();
+        router.get("/metrics", move |_| {
+            let m = metrics.clone();
+            let db = db.clone();
+            let uring = uring.clone();
+            async move {
+                let ds = db.stats();
+                m.update_db_stats(&ds);
+                m.update_db_gauges(db.len(), db.memtable_size());
+                let us = uring.stats();
+                m.update_uring_stats(&us);
+                let mut r = Response::text(m.render());
+                r.header("Content-Type", "text/plain; version=0.0.4");
+                r
+            }
+        });
+    }
+
+    {
+        let sandbox = sandbox.clone();
+        router.get("/plugins", move |_| {
+            let sb = sandbox.clone();
+            async move {
+                let sb = sb.lock().await;
+                Response::json(&serde_json::json!({"count":sb.list().len(),"plugins":sb.list()}))
+            }
+        });
+    }
+
+    {
+        let eb = event_bus.clone();
+        router.get("/notifications/stats", move |_| {
+            let eb = eb.clone();
+            async move {
+                Response::json(&serde_json::json!({"total":eb.total(),"status":"active"}))
+            }
+        });
+    }
 
     // ═══ DB API ═══
-    { let db = db.clone();
-    router.get("/:key", move |req| { let db = db.clone(); async move {
-        let key = req.param("key").unwrap_or("");
-        match db.get(key) {
-            Some(v) => { let mut r = Response::text(v.display()); r.header("Content-Type","text/plain; charset=utf-8"); r }
-            None => Response::not_found(format!("key not found: {key}")),
-        }
-    }}); }
+    {
+        let db = db.clone();
+        router.get("/:key", move |req| {
+            let db = db.clone();
+            async move {
+                let key = req.param("key").unwrap_or("");
+                match db.get(key) {
+                    Some(v) => {
+                        let mut r = Response::text(v.display());
+                        r.header("Content-Type", "text/plain; charset=utf-8");
+                        r
+                    }
+                    None => Response::not_found(format!("key not found: {key}")),
+                }
+            }
+        });
+    }
 
-    { let db = db.clone();
-    router.post("/:key", move |req| { let db = db.clone(); async move {
-        let key = req.param("key").unwrap_or("").to_string();
-        let value = if req.body_str().trim_start().starts_with('{') || req.body_str().trim_start().starts_with('[') {
-            Value::from_json_str(req.body_str()).unwrap_or_else(|_| Value::Bytes(req.body.clone()))
-        } else { Value::Bytes(req.body.clone()) };
-        match db.put(&key, value) {
-            Ok(_) => Response::text(format!("stored: {key}")),
-            Err(_) => Response::new(StatusCode(500)),
-        }
-    }}); }
+    {
+        let db = db.clone();
+        let eb = event_bus.clone();
+        router.post("/:key", move |req| {
+            let db = db.clone();
+            let eb = eb.clone();
+            async move {
+                let key = req.param("key").unwrap_or("").to_string();
+                let value = if req.body_str().trim_start().starts_with('{') || req.body_str().trim_start().starts_with('[') {
+                    Value::from_json_str(req.body_str()).unwrap_or_else(|_| Value::Bytes(req.body.clone()))
+                } else { Value::Bytes(req.body.clone()) };
+                match db.put(&key, value) {
+                    Ok(_) => {
+                        eb.publish(realtime::Notification::new("db_write", serde_json::json!({"key": key})));
+                        Response::text(format!("stored: {key}"))
+                    }
+                    Err(_) => Response::new(StatusCode(500)),
+                }
+            }
+        });
+    }
 
-    { let db = db.clone();
-    router.delete("/:key", move |req| { let db = db.clone(); async move {
-        let key = req.param("key").unwrap_or("");
-        match db.delete(key) {
-            Ok(true) => Response::text("deleted"),
-            Ok(false) => Response::not_found("key was not present"),
-            Err(_) => Response::new(StatusCode(500)),
-        }
-    }}); }
+    {
+        let db = db.clone();
+        let eb = event_bus.clone();
+        router.delete("/:key", move |req| {
+            let db = db.clone();
+            let eb = eb.clone();
+            async move {
+                let key = req.param("key").unwrap_or("");
+                match db.delete(key) {
+                    Ok(true) => {
+                        eb.publish(realtime::Notification::new("db_delete", serde_json::json!({"key": key})));
+                        Response::text("deleted")
+                    }
+                    Ok(false) => Response::not_found("key was not present"),
+                    Err(_) => Response::new(StatusCode(500)),
+                }
+            }
+        });
+    }
 
-    { let db = db.clone();
-    router.get("/scan/:prefix", move |req| { let db = db.clone(); async move {
-        let prefix = req.param("prefix").unwrap_or("");
-        let results = db.scan_prefix(prefix, 1000);
-        let body: Vec<_> = results.iter().map(|(k,v)| serde_json::json!({"key":String::from_utf8_lossy(k),"value":v.display()})).collect();
-        Response::json(&serde_json::json!({"results":body,"count":body.len()}))
-    }}); }
+    {
+        let db = db.clone();
+        router.get("/scan/:prefix", move |req| {
+            let db = db.clone();
+            async move {
+                let prefix = req.param("prefix").unwrap_or("");
+                let results = db.scan_prefix(prefix, 1000);
+                let body: Vec<_> = results.iter().map(|(k,v)| serde_json::json!({"key":String::from_utf8_lossy(k),"value":v.display()})).collect();
+                Response::json(&serde_json::json!({"results":body,"count":body.len()}))
+            }
+        });
+    }
 
     // ═══ AUTH API ═══
-    { let auth = auth.clone();
-    router.post("/auth/register", move |req| { let auth = auth.clone(); async move {
-        let json: serde_json::Value = match serde_json::from_str(req.body_str()) { Ok(v)=>v, Err(_)=>return Response::text("invalid JSON") };
-        match auth.register(json["username"].as_str().unwrap_or(""), json["email"].as_str().unwrap_or(""), json["password"].as_str().unwrap_or("")) {
-            Ok(r) => Response::json(&serde_json::json!({"status":"ok","token":r.token,"expires_in":r.expires_in,"user":{"id":r.user.id,"username":r.user.username,"role":r.user.role,"verified":r.user.verified}})),
-            Err(e) => { let mut r = Response::new(StatusCode(400)); r.header("Content-Type","application/json"); r.body = serde_json::to_vec(&serde_json::json!({"error":e.to_string()})).unwrap_or_default(); r }
-        }
-    }}); }
-
-    { let auth = auth.clone();
-    router.post("/auth/login", move |req| { let auth = auth.clone(); async move {
-        let json: serde_json::Value = match serde_json::from_str(req.body_str()) { Ok(v)=>v, Err(_)=>return Response::text("invalid JSON") };
-        match auth.login(json["email"].as_str().unwrap_or(""), json["password"].as_str().unwrap_or("")) {
-            Ok(r) => Response::json(&serde_json::json!({"status":"ok","token":r.token,"expires_in":r.expires_in,"user":{"id":r.user.id,"username":r.user.username,"role":r.user.role}})),
-            Err(e) => { let mut r = Response::new(StatusCode(401)); r.header("Content-Type","application/json"); r.body = serde_json::to_vec(&serde_json::json!({"error":e.to_string()})).unwrap_or_default(); r }
-        }
-    }}); }
-
-    { let auth = auth.clone();
-    router.get("/auth/me", move |req| { let auth = auth.clone(); async move {
-        let token = req.header("authorization").and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()));
-        match token.and_then(|t| auth.verify_token(&t).ok()) {
-            Some(claims) => match auth.get_user(&claims.sub) {
-                Ok(u) => Response::json(&serde_json::json!({"id":u.id,"username":u.username,"email":u.email,"role":u.role,"verified":u.verified})),
-                Err(e) => Response::text(e.to_string()),
-            },
-            _ => { let mut r = Response::new(StatusCode(401)); r.body = b"auth required".to_vec(); r }
-        }
-    }}); }
-
-    { let auth = auth.clone();
-    router.get("/auth/users", move |req| { let auth = auth.clone(); async move {
-        let token = req.header("authorization").and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()));
-        match token.and_then(|t| auth.verify_token(&t).ok()) {
-            Some(claims) => match auth.get_user(&claims.sub) {
-                Ok(user) if user.role == "admin" => {
-                    let users = auth.list_users().unwrap_or_default();
-                    let safe: Vec<_> = users.iter().map(|u| serde_json::json!({"id":u.id,"username":u.username,"email":u.email,"role":u.role,"verified":u.verified})).collect();
-                    Response::json(&serde_json::json!({"users":safe,"count":safe.len()}))
+    {
+        let auth = auth.clone();
+        let eb = event_bus.clone();
+        router.post("/auth/register", move |req| {
+            let auth = auth.clone();
+            let eb = eb.clone();
+            async move {
+                let json: serde_json::Value = match serde_json::from_str(req.body_str()) { Ok(v)=>v, Err(_)=>return Response::text("invalid JSON") };
+                match auth.register(json["username"].as_str().unwrap_or(""), json["email"].as_str().unwrap_or(""), json["password"].as_str().unwrap_or("")) {
+                    Ok(r) => {
+                        eb.publish(realtime::Notification::new("user_registered", serde_json::json!({"username":r.user.username})));
+                        Response::json(&serde_json::json!({"status":"ok","token":r.token,"expires_in":r.expires_in,"user":{"id":r.user.id,"username":r.user.username,"role":r.user.role,"verified":r.user.verified}}))
+                    }
+                    Err(e) => {
+                        let mut r = Response::new(StatusCode(400));
+                        r.header("Content-Type","application/json");
+                        r.body = serde_json::to_vec(&serde_json::json!({"error":e.to_string()})).unwrap_or_default();
+                        r
+                    }
                 }
-                _ => { let mut r = Response::new(StatusCode(403)); r.body = b"admin required".to_vec(); r }
-            },
-            _ => { let mut r = Response::new(StatusCode(401)); r.body = b"auth required".to_vec(); r }
-        }
-    }}); }
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        router.post("/auth/login", move |req| {
+            let auth = auth.clone();
+            async move {
+                let json: serde_json::Value = match serde_json::from_str(req.body_str()) { Ok(v)=>v, Err(_)=>return Response::text("invalid JSON") };
+                match auth.login(json["email"].as_str().unwrap_or(""), json["password"].as_str().unwrap_or("")) {
+                    Ok(r) => Response::json(&serde_json::json!({"status":"ok","token":r.token,"expires_in":r.expires_in,"user":{"id":r.user.id,"username":r.user.username,"role":r.user.role}})),
+                    Err(e) => {
+                        let mut r = Response::new(StatusCode(401));
+                        r.header("Content-Type","application/json");
+                        r.body = serde_json::to_vec(&serde_json::json!({"error":e.to_string()})).unwrap_or_default();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        router.get("/auth/me", move |req| {
+            let auth = auth.clone();
+            async move {
+                let token = req.header("authorization").and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()));
+                match token.and_then(|t| auth.verify_token(&t).ok()) {
+                    Some(claims) => match auth.get_user(&claims.sub) {
+                        Ok(u) => Response::json(&serde_json::json!({"id":u.id,"username":u.username,"email":u.email,"role":u.role,"verified":u.verified})),
+                        Err(e) => Response::text(e.to_string()),
+                    },
+                    None => { let mut r = Response::new(StatusCode(401)); r.body = b"missing token".to_vec(); r }
+                }
+            }
+        });
+    }
+
+    {
+        let auth = auth.clone();
+        router.get("/auth/users", move |req| {
+            let auth = auth.clone();
+            async move {
+                let token = req.header("authorization").and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()));
+                match token.and_then(|t| auth.verify_token(&t).ok()) {
+                    Some(claims) => match auth.get_user(&claims.sub) {
+                        Ok(user) if user.role == "admin" => {
+                            let users = auth.list_users().unwrap_or_default();
+                            let safe: Vec<_> = users.iter().map(|u| serde_json::json!({"id":u.id,"username":u.username,"email":u.email,"role":u.role,"verified":u.verified})).collect();
+                            Response::json(&serde_json::json!({"users":safe,"count":safe.len()}))
+                        }
+                        _ => { let mut r = Response::new(StatusCode(403)); r.body = b"admin required".to_vec(); r }
+                    },
+                    None => { let mut r = Response::new(StatusCode(401)); r.body = b"missing token".to_vec(); r }
+                }
+            }
+        });
+    }
+
+    // ═══ PASSWORD RESET ═══
+    router.get("/password-reset", move |_| async {
+        let mut r = Response::text(dashboard::render_password_reset());
+        r.header("Content-Type", "text/html; charset=utf-8");
+        r
+    });
+
+    router.post("/password-reset", move |req| async move {
+        let form = parse_form(req.body_str());
+        let email = form.get("email").map(|s| s.as_str()).unwrap_or("");
+        let mut r = Response::text(dashboard::render_password_reset_confirm(email));
+        r.header("Content-Type", "text/html; charset=utf-8");
+        r
+    });
+
+    // ═══ BACKUP / RESTORE ═══
+    {
+        let db = db.clone();
+        let auth = auth.clone();
+        router.get("/backup", move |req| {
+            let db = db.clone();
+            let auth = auth.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(u) if u.role == "admin" => {
+                        let backup = middleware::backup_db(&db);
+                        let mut r = Response::ok(backup);
+                        r.header("Content-Type", "application/json");
+                        r.header("Content-Disposition", "attachment; filename=\"nawa-backup.json\"");
+                        r
+                    }
+                    _ => { let mut r = Response::new(StatusCode(403)); r.body = b"admin required".to_vec(); r }
+                }
+            }
+        });
+    }
+
+    {
+        let db = db.clone();
+        let auth = auth.clone();
+        router.post("/restore", move |req| {
+            let db = db.clone();
+            let auth = auth.clone();
+            async move {
+                match get_current_user(&req, &auth) {
+                    Some(u) if u.role == "admin" => {
+                        match middleware::restore_db(&db, &req.body) {
+                            Ok(count) => Response::json(&serde_json::json!({"status":"ok","restored":count})),
+                            Err(e) => {
+                                let mut r = Response::new(StatusCode(400));
+                                r.header("Content-Type", "application/json");
+                                r.body = serde_json::to_vec(&serde_json::json!({"error":e})).unwrap_or_default();
+                                r
+                            }
+                        }
+                    }
+                    _ => { let mut r = Response::new(StatusCode(403)); r.body = b"admin required".to_vec(); r }
+                }
+            }
+        });
+    }
 
     // ═══ STATIC FILES ═══
     {
@@ -500,198 +792,21 @@ fn build_router(
         });
     }
 
-    // ═══ USER PROFILE ═══
-    {
-        let auth = auth.clone();
-        router.get("/profile", move |req| {
-            let auth = auth.clone();
-            async move {
-                match get_current_user(&req, &auth) {
-                    Some(user) => {
-                        let html = dashboard::render_profile(&user);
-                        let mut resp = Response::text(html);
-                        resp.header("Content-Type", "text/html; charset=utf-8");
-                        resp
-                    }
-                    None => {
-                        let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
-                        resp.header("Content-Type", "text/html");
-                        resp
-                    }
-                }
-            }
-        });
-    }
-    {
-        let auth = auth.clone();
-        let db = db.clone();
-        router.post("/profile", move |req| {
-            let auth = auth.clone();
-            let db = db.clone();
-            async move {
-                match get_current_user(&req, &auth) {
-                    Some(user) => {
-                        let form = parse_form(req.body_str());
-                        let mut updated = user.clone();
-                        if let Some(username) = form.get("username") { updated.username = username.clone(); }
-                        if let Some(email) = form.get("email") {
-                            let old_key = format!("user:email:{}", user.email);
-                            let _ = db.delete(&old_key);
-                            let new_key = format!("user:email:{}", email);
-                            let _ = db.put(&new_key, nawa_db::Value::from_str(&user.id));
-                            updated.email = email.clone();
-                        }
-                        if let Some(pwd) = form.get("new_password") {
-                            if !pwd.is_empty() { updated.password_hash = nawa_auth::password::hash_password(pwd); }
-                        }
-                        let user_json = serde_json::to_string(&updated).unwrap_or_default();
-                        let _ = db.put(format!("user:{}", user.id), nawa_db::Value::from_json_str(&user_json).unwrap_or_else(|_| nawa_db::Value::Bytes(user_json.into_bytes())));
-                        let mut resp = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/profile"></head><body>تم الحفظ...</body></html>"#);
-                        resp.header("Content-Type", "text/html");
-                        resp
-                    }
-                    None => Response::new(StatusCode(401)),
-                }
-            }
-        });
-    }
-
-    // ═══ SYSTEM INFO ═══
-    {
-        let db = db.clone(); let auth = auth.clone(); let uring = uring.clone();
-        router.get("/system", move |_| {
-            let db = db.clone(); let auth = auth.clone(); let uring = uring.clone();
-            async move {
-                let html = dashboard::render_system(&db, &auth, &uring);
-                let mut resp = Response::text(html);
-                resp.header("Content-Type", "text/html; charset=utf-8");
-                resp
-            }
-        });
-    }
-
-    // ═══ BACKUP / RESTORE ═══
-    // GET /backup — download DB as JSON (admin only)
-    {
-        let db = db.clone(); let auth = auth.clone();
-        router.get("/backup", move |req| {
-            let db = db.clone(); let auth = auth.clone();
-            async move {
-                let user = get_current_user(&req, &auth);
-                match user {
-                    Some(u) if u.role == "admin" => {
-                        let backup = middleware::backup_db(&db);
-                        let mut resp = Response::ok(backup);
-                        resp.header("Content-Type", "application/json");
-                        resp.header("Content-Disposition", "attachment; filename=\"nawa-backup.json\"");
-                        middleware::add_security_headers(&mut resp);
-                        resp
-                    }
-                    _ => {
-                        let mut r = Response::new(StatusCode(403));
-                        r.body = dashboard::render_error("صلاحية الأدمن مطلوبة", "/").into_bytes();
-                        r.header("Content-Type", "text/html; charset=utf-8");
-                        r
-                    }
-                }
-            }
-        });
-    }
-
-    // POST /restore — restore DB from JSON (admin only)
-    {
-        let db = db.clone(); let auth = auth.clone();
-        router.post("/restore", move |req| {
-            let db = db.clone(); let auth = auth.clone();
-            async move {
-                let user = get_current_user(&req, &auth);
-                match user {
-                    Some(u) if u.role == "admin" => {
-                        match middleware::restore_db(&db, &req.body) {
-                            Ok(count) => Response::json(&serde_json::json!({
-                                "status": "ok", "restored": count
-                            })),
-                            Err(e) => {
-                                let mut r = Response::new(StatusCode(400));
-                                r.header("Content-Type", "application/json");
-                                r.body = serde_json::to_vec(&serde_json::json!({"error": e})).unwrap_or_default();
-                                r
-                            }
-                        }
-                    }
-                    _ => {
-                        let mut r = Response::new(StatusCode(403));
-                        r.body = b"admin required".to_vec();
-                        r
-                    }
-                }
-            }
-        });
-    }
-
-    // ═══ PASSWORD RESET ═══
-    // GET /password-reset — request reset page
-    {
-        router.get("/password-reset", move |_| async {
-            let html = dashboard::render_password_reset();
-            let mut resp = Response::text(html);
-            resp.header("Content-Type", "text/html; charset=utf-8");
-            resp
-        });
-    }
-
-    // POST /password-reset — submit reset request
-    {
-        router.post("/password-reset", move |req| async move {
-            let form = parse_form(req.body_str());
-            let email = form.get("email").map(|s| s.as_str()).unwrap_or("");
-            let html = dashboard::render_password_reset_confirm(email);
-            let mut resp = Response::text(html);
-            resp.header("Content-Type", "text/html; charset=utf-8");
-            resp
-        });
-    }
-
-    // POST /auth/reset-password — API: reset password with email + new password
-    {
-        let auth = auth.clone();
-        router.post("/auth/reset-password", move |req| {
-            let auth = auth.clone();
-            async move {
-                let json: serde_json::Value = match serde_json::from_str(req.body_str()) {
-                    Ok(v) => v, Err(_) => return Response::text("invalid JSON"),
-                };
-                let _email = json["email"].as_str().unwrap_or("");
-                let _new_password = json["new_password"].as_str().unwrap_or("");
-                // In production: verify reset token, then update password.
-                // For alpha: just re-register with same email if exists.
-                let _email_key = format!("user:email:{}", _email);
-                match auth.get_user("u1") {
-                    Ok(_) => {
-                        // Simulate: re-hash and store.
-                        Response::json(&serde_json::json!({
-                            "status": "ok",
-                            "message": "password reset (alpha — no token verification yet)"
-                        }))
-                    }
-                    Err(_) => Response::text("user not found"),
-                }
-            }
-        });
-    }
-
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
             "name":"NAWA","version":"0.1.0-alpha",
-            "description":"Revolutionary Web Operating System built in Rust",
-            "endpoints":["GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
-            "GET /settings","POST /settings","POST /admin/verify","POST /admin/role","POST /admin/delete",
-            "GET /ssr","GET /health","GET /uring","GET /metrics","GET /plugins",
-            "GET /:key","POST /:key","DELETE /:key","GET /scan/:prefix",
-            "POST /auth/register","POST /auth/login","GET /auth/me","GET /auth/users",
-            "POST /auth/reset-password","GET /password-reset","POST /password-reset",
-            "GET /profile","POST /profile","GET /system","GET /backup","POST /restore","GET /static/:path","GET /api"]
+            "description":"Revolutionary Web Operating System — zero polling, real-time push",
+            "endpoints": [
+                "GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
+                "GET /profile","POST /profile","GET /settings","POST /settings",
+                "POST /admin/verify","POST /admin/role","POST /admin/delete",
+                "GET /system","GET /ssr","GET /health","GET /uring","GET /metrics","GET /plugins",
+                "GET /notifications/stats","GET /:key","POST /:key","DELETE /:key","GET /scan/:prefix",
+                "POST /auth/register","POST /auth/login","GET /auth/me","GET /auth/users",
+                "GET /password-reset","POST /password-reset",
+                "GET /backup","POST /restore","GET /static/:path","GET /api"
+            ]
         }))
     });
 
@@ -738,20 +853,19 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 fn print_info() {
     println!("NAWA Web Operating System v0.1.0-alpha");
     println!("═══════════════════════════════════════════════");
-    println!("Built-in (zero external deps):");
+    println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");
     println!("  • nawa-engine:  Unified SSR (zero-copy+design)");
     println!("  • nawa-auth:    JWT + RBAC (admin/user)");
     println!("  • nawa-uring:   Real io_uring (Linux 5.1+)");
     println!("  • nawa-wasm:    WASM sandbox (wasmtime)");
     println!("  • nawa-http:    HTTP/1.1 + type-safe router");
-    println!("  • nawa-kernel:  mmap + ring buffer + zero-copy");
+    println!("  • realtime:     WebSocket + Event Bus (push)");
     println!("\nPlatform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
     println!("License:  MIT OR Apache-2.0\n");
     println!("Commands:");
     println!("  nawad serve          Start the server");
-    println!("  nawad serve --config ./nawa.toml   Use config file");
-    println!("  nawad init           Generate default nawa.toml");
+    println!("  nawad init           Generate nawa.toml");
     println!("  nawad benchmark      Run DB benchmarks");
     println!("  nawad info           Show this info");
 }
