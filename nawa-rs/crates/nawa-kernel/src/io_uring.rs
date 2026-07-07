@@ -139,7 +139,7 @@ impl IoUringPipeline {
         self.tx
             .send((entry, tx))
             .map_err(|_| KernelError::IoUringSetup("worker dropped".into()))?;
-        Ok(rx.await.map_err(|_| KernelError::IoUringSetup("canceled".into()))?)
+        rx.await.map_err(|_| KernelError::IoUringSetup("canceled".into()))
     }
 
     /// Number of entries submitted since start.

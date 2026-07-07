@@ -126,7 +126,7 @@ pub fn build_photon_response(
         .filter(|e| e.importance >= 0.7)
         .map(|e| e.url.clone())
         .collect();
-    priority.sort_by(|a, b| b.len().cmp(&a.len()));  // shorter URLs first (more general)
+    priority.sort_by_key(|b| std::cmp::Reverse(b.len()));  // shorter URLs first (more general)
 
     PhotonResponse {
         protocol: "photon/1.0".to_string(),

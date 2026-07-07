@@ -99,7 +99,7 @@ impl Island {
         let mut el = HtmlElement::new("div")
             .attr("data-island", &self.id)
             .attr("data-component", &self.component)
-            .attr("data-props", &self.props.to_json());
+            .attr("data-props", self.props.to_json());
 
         for node in &self.ssr_content {
             el = el.child(node.clone());

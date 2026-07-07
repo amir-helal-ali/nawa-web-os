@@ -20,10 +20,10 @@ pub enum PasswordError {
 pub fn hash_password(password: &str) -> String {
     let mut salt = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut salt);
-    let salt_hex = hex::encode(&salt);
+    let salt_hex = hex::encode(salt);
 
     let mut hasher = Sha256::new();
-    hasher.update(&salt);
+    hasher.update(salt);
     hasher.update(password.as_bytes());
     let hash = hasher.finalize();
     let hash_hex = hex::encode(hash);

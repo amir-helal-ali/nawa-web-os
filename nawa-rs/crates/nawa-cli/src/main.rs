@@ -564,11 +564,10 @@ fn run_tests(
 
     cmd.arg("--release");
 
-    println!("$ cargo {:?} {} {} {}",
+    println!("$ cargo {:?} {} {} --release",
         if bench { "bench" } else { "test" },
         if let Some(n) = crate_name { format!("-p {n}") } else { "--workspace".into() },
-        if verbose { "--verbose" } else { "" },
-        "--release"
+        if verbose { "--verbose" } else { "" }
     );
     println!();
 
@@ -596,9 +595,9 @@ fn serve_example(addr: &str) -> anyhow::Result<()> {
     println!();
     println!("Starting server on {addr}...");
     println!();
-    println!("  Home:   http://localhost:{}", addr.split(':').last().unwrap_or("8080"));
-    println!("  API:    http://localhost:{}/api", addr.split(':').last().unwrap_or("8080"));
-    println!("  Health: http://localhost:{}/health", addr.split(':').last().unwrap_or("8080"));
+    println!("  Home:   http://localhost:{}", addr.split(':').next_back().unwrap_or("8080"));
+    println!("  API:    http://localhost:{}/api", addr.split(':').next_back().unwrap_or("8080"));
+    println!("  Health: http://localhost:{}/health", addr.split(':').next_back().unwrap_or("8080"));
     println!();
     println!("Press Ctrl+C to stop");
     println!();

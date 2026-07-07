@@ -30,6 +30,7 @@ impl Method {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "GET" => Some(Method::Get),
@@ -253,9 +254,7 @@ impl PathPattern {
                     }
                 }
                 PatternSegment::Wildcard => {
-                    if path_segments.get(i).is_none() {
-                        return None;
-                    }
+                    path_segments.get(i)?;
                 }
                 PatternSegment::CatchAll(name) => {
                     // Capture all remaining segments as a single slash-joined string.

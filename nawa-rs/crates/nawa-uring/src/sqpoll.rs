@@ -20,6 +20,8 @@ pub struct SqPollConfig {
 
 impl SqPollConfig {
     /// Create a default SQPOLL config (1s idle timeout).
+    /// Custom default factory (not the `Default` trait — returns a non-const config).
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Self {
         Self {
             idle_timeout_ms: 1000,

@@ -147,7 +147,7 @@ pub fn extract_ip(headers: &HashMap<String, String>) -> String {
     headers.get("x-forwarded-for")
         .and_then(|h| h.split(',').next())
         .map(|s| s.trim().to_string())
-        .or_else(|| headers.get("x-real-ip").map(|s| s.clone()))
+        .or_else(|| headers.get("x-real-ip").cloned())
         .unwrap_or_else(|| "127.0.0.1".to_string())
 }
 

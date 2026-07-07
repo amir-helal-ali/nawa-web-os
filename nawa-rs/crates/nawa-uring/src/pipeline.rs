@@ -171,6 +171,8 @@ impl NawaUring {
     }
 
     /// Create a pipeline with default config.
+    /// Custom default factory — returns `Result` so can't be the `Default` trait.
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Result<Self> {
         Self::new(PipelineConfig::default())
     }
@@ -281,6 +283,9 @@ mod linux_impl {
 
     pub struct LinuxUring {
         ring: Arc<Mutex<IoUring>>,
+        // Type alias avoids clippy::type_complexity — the closure-tracking map
+        // is fundamental to the io_uring submission/completion protocol.
+        #[allow(clippy::type_complexity)]
         pending: Arc<Mutex<HashMap<u64, (oneshot::Sender<CompletionEvent>, Instant, OpCode)>>>,
         next_user_data: Arc<AtomicU64>,
         stats: Arc<PipelineStats>,

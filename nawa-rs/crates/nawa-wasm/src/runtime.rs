@@ -84,6 +84,8 @@ impl Sandbox {
     }
 
     /// Create a sandbox with default config.
+    /// Custom default factory — returns `Result` so can't be the `Default` trait.
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> SandboxResult<Self> {
         Self::new(SandboxConfig::default())
     }

@@ -141,8 +141,17 @@ async fn serve(cfg: config::Config, svelte_dir: Option<PathBuf>) -> anyhow::Resu
         None
     };
 
-    let router = build_router(db.clone(), auth.clone(), uring.clone(), sandbox.clone(),
-        metrics.clone(), rate_limiter, static_server, event_bus.clone(), svelte_handler.clone());
+    let router = build_router(RouterDeps {
+        db: db.clone(),
+        auth: auth.clone(),
+        uring: uring.clone(),
+        sandbox: sandbox.clone(),
+        metrics: metrics.clone(),
+        _rate_limiter: rate_limiter,
+        static_server,
+        event_bus: event_bus.clone(),
+        svelte_handler: svelte_handler.clone(),
+    });
     tracing::info!("✓ Router: {} routes", router.len());
 
     let addr: SocketAddr = cfg.addr.parse()?;
@@ -198,14 +207,23 @@ fn get_current_user(req: &nawa_http::Request, auth: &AuthStore) -> Option<User> 
     auth.get_user(&claims.sub).ok()
 }
 
-fn build_router(
-    db: Arc<DbEngine>, auth: Arc<AuthStore>, uring: Arc<NawaUring>,
+/// All shared state passed into the router builder.
+/// Grouped into a struct to keep the function signature under clippy's
+/// `too many arguments` threshold.
+struct RouterDeps {
+    db: Arc<DbEngine>,
+    auth: Arc<AuthStore>,
+    uring: Arc<NawaUring>,
     sandbox: Arc<tokio::sync::Mutex<nawa_wasm::Sandbox>>,
-    metrics: Arc<Metrics>, _rate_limiter: Arc<middleware::RateLimiter>,
+    metrics: Arc<Metrics>,
+    _rate_limiter: Arc<middleware::RateLimiter>,
     static_server: Arc<middleware::StaticServer>,
     event_bus: Arc<realtime::EventBus>,
     svelte_handler: Option<Arc<nawa_svelte::SvelteHandler>>,
-) -> Router {
+}
+
+fn build_router(deps: RouterDeps) -> Router {
+    let RouterDeps { db, auth, uring, sandbox, metrics, _rate_limiter, static_server, event_bus, svelte_handler } = deps;
     let mut router = Router::new();
 
     // ═══ DASHBOARD ═══
@@ -348,8 +366,8 @@ fn build_router(
                         let mut updated = user.clone();
                         if let Some(u) = form.get("username") { updated.username = u.clone(); }
                         if let Some(e) = form.get("email") {
-                            let _ = db.delete(&format!("user:email:{}", user.email));
-                            let _ = db.put(&format!("user:email:{}", e), Value::from_str(&user.id));
+                            let _ = db.delete(format!("user:email:{}", user.email));
+                            let _ = db.put(format!("user:email:{}", e), Value::from_str(&user.id));
                             updated.email = e.clone();
                         }
                         if let Some(p) = form.get("new_password") {
@@ -880,7 +898,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                     html.push_str("</strong> — ");
                     html.push_str(&h.route_count().to_string());
                     html.push_str(" routes (no Node.js at runtime)</p>");
-                    html.push_str(&format!("<p>Visit <a href=\"/svelte/\">/svelte/</a> for the app home page.</p>"));
+                    html.push_str("<p>Visit <a href=\"/svelte/\">/svelte/</a> for the app home page.</p>");
                     html.push_str("<table><tr><th>Pattern</th><th>Methods</th><th>Auth</th><th>Admin</th><th>Type</th></tr>");
                     for r in h.manifest.iter_routes() {
                         html.push_str(&format!(
@@ -922,8 +940,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                     };
 
                     // Special case: /svelte/_assets/<path> → serve static asset.
-                    if rest.starts_with("_assets/") {
-                        let asset_path = &rest["_assets/".len()..];
+                    if let Some(asset_path) = rest.strip_prefix("_assets/") {
                         match h.serve_asset(asset_path) {
                             Some((bytes, content_type)) => {
                                 let mut r = Response::ok(bytes);

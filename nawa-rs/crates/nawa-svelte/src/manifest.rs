@@ -165,7 +165,7 @@ fn match_pattern(pattern: &str, path_segments: &[&str]) -> Option<HashMap<String
         // Catch-all: [...rest]
         if let Some(name) = pseg.strip_prefix("[...").and_then(|s| s.strip_suffix(']')) {
             // Consume all remaining path segments.
-            let rest: Vec<&str> = s_iter.by_ref().map(|s| *s).collect();
+            let rest: Vec<&str> = s_iter.by_ref().copied().collect();
             params.insert(name.to_string(), rest.join("/"));
             return Some(params);
         }

@@ -17,7 +17,7 @@ impl BloomFilter {
     pub fn new(expected_items: usize, false_positive_rate: f64) -> Self {
         let num_bits = optimal_num_bits(expected_items, false_positive_rate);
         let num_hashes = optimal_num_hashes(num_bits, expected_items);
-        let num_words = (num_bits + 63) / 64;
+        let num_words = num_bits.div_ceil(64);
         Self {
             bits: vec![0u64; num_words],
             num_hashes,
@@ -83,7 +83,7 @@ fn optimal_num_hashes(bits: usize, items: usize) -> usize {
         return 1;
     }
     let k = ((bits as f64 / items as f64) * std::f64::consts::LN_2).ceil() as usize;
-    k.max(1).min(30)
+    k.clamp(1, 30)
 }
 
 #[cfg(test)]

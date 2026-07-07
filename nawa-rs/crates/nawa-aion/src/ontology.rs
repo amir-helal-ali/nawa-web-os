@@ -92,6 +92,12 @@ pub struct KnowledgeGraph {
     pub generated_at: String,
 }
 
+impl Default for KnowledgeGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KnowledgeGraph {
     pub fn new() -> Self {
         Self {

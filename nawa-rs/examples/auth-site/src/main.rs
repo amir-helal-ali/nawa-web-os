@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     println!("✓ Users: {}", auth.user_count());
 
     let addr = "0.0.0.0:8080";
-    let port = addr.split(':').last().unwrap_or("8080");
+    let port = addr.split(':').next_back().unwrap_or("8080");
     println!("\n🚀 Auth site running on http://localhost:{port}");
     println!("\n   Register:  http://localhost:{port}/register");
     println!("   Login:     http://localhost:{port}/login");

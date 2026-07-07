@@ -72,8 +72,7 @@ impl<K: Ord + Clone, V: Clone> SkipList<K, V> {
         // Simulate level growth.
         let curr = self.max_level.load(AtomicOrd::Relaxed);
         let target = ((self.len.load(AtomicOrd::Relaxed) as f64).log2().ceil() as usize)
-            .min(MAX_LEVEL)
-            .max(1);
+            .clamp(1, MAX_LEVEL);
         if target > curr {
             self.max_level.store(target, AtomicOrd::Relaxed);
         }

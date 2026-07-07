@@ -55,6 +55,8 @@ pub enum Value {
 
 impl Value {
     /// Create a bytes value from a string.
+    /// Named `from_str` for API symmetry with `from_i64` / `from_json_str`.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         Value::Bytes(s.as_bytes().to_vec())
     }
