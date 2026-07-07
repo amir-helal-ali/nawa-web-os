@@ -9,6 +9,11 @@ description = "NAWA daemon binary — HTTP server + DB + kernel"
 name = "nawad"
 path = "src/main.rs"
 
+[[bench]]
+name = "nawa_benchmarks"
+harness = false
+path = "benches/nawa_benchmarks.rs"
+
 [dependencies]
 nawa-kernel = { path = "../nawa-kernel" }
 nawa-db = { path = "../nawa-db" }

@@ -1062,6 +1062,11 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                     }
                     counts
                 };
+                // Run a single healing pass in dry-run mode to get current issue count.
+                let mut healing = nawa_aion::HealingLoop::new(nawa_aion::HealingConfig {
+                    apply_fixes: false, ..Default::default()
+                });
+                let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
                     "engine": "AION v0.1.0-alpha",
@@ -1071,11 +1076,22 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                         "entity_types": entity_types,
                         "generated_at": graph.generated_at
                     },
+                    "self_healing": {
+                        "last_run": {
+                            "issues_detected": report.issues_detected,
+                            "issues_fixed": report.issues_fixed,
+                            "issues_unfixed": report.issues_unfixed,
+                            "duration_ms": report.duration_ms,
+                            "mode": format!("{:?}", report.mode)
+                        },
+                        "total_fixes_applied": healing.total_fixes_applied()
+                    },
                     "features": {
                         "ontological_inference": true,
                         "adaptive_negotiation": true,
                         "photon_protocol": true,
                         "multi_format_rendering": true,
+                        "self_healing_loop": true,
                         "supported_formats": [
                             "html+jsonld", "markdown+jsonld", "html+og", "html+twitter",
                             "rss", "atom", "jsonld", "json", "markdown"
@@ -1085,9 +1101,35 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                         "photon": "/__photon__",
                         "sitemap": "/sitemap.xml",
                         "robots": "/robots.txt",
-                        "stats": "/aion/stats"
+                        "stats": "/aion/stats",
+                        "healing": "/aion/heal"
                     }
                 }))
+            }
+        });
+    }
+
+    // GET /aion/heal — trigger a healing pass on demand (admin-only in production).
+    {
+        let db = db.clone();
+        let auth = auth.clone();
+        router.post("/aion/heal", move |req| {
+            let db = db.clone();
+            let auth = auth.clone();
+            async move {
+                // Admin-only.
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    let mut r = Response::new(StatusCode(403));
+                    r.body = b"admin required".to_vec();
+                    return r;
+                }
+                let mut healing = nawa_aion::HealingLoop::new(nawa_aion::HealingConfig {
+                    apply_fixes: true, ..Default::default()
+                });
+                let report = healing.run_once(&db);
+                Response::json(&serde_json::to_value(&report).unwrap_or(serde_json::Value::Null))
             }
         });
     }
@@ -1107,7 +1149,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /password-reset","POST /password-reset",
                 "GET /backup","POST /restore","GET /static/:path","GET /api",
                 "GET /svelte/_info","GET /svelte/**",
-                "GET /__photon__","GET /sitemap.xml","GET /robots.txt","GET /aion/stats"
+                "GET /__photon__","GET /sitemap.xml","GET /robots.txt","GET /aion/stats","POST /aion/heal"
             ]
         }))
     });

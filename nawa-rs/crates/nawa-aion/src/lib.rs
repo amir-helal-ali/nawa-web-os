@@ -28,10 +28,15 @@
 //! - `GET /robots.txt` — robots with AI crawler allowlist
 //! - Any entity URL → auto-negotiated format based on User-Agent
 
+pub mod healing;
 pub mod negotiation;
 pub mod ontology;
 pub mod photon;
 
+pub use healing::{
+    run_background_healing, AppliedFix, HealingConfig, HealingLoop, HealingMode,
+    HealingReport, IssueKind, SeoIssue, Severity,
+};
 pub use negotiation::{detect_crawler, negotiate, render_adaptive, ResponseFormat};
 pub use ontology::{
     build_knowledge_graph, generate_jsonld, generate_jsonld_graph,

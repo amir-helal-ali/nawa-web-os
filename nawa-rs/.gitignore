@@ -22,3 +22,10 @@ Thumbs.db
 *.log
 *.sst
 *.wal
+
+# Svelte app node_modules
+examples/svelte-app/node_modules/
+examples/svelte-app/_nawa/
+
+# Release binaries (uploaded to GitHub Releases instead)
+download/
