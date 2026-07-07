@@ -2,6 +2,7 @@
 //!
 //! محرك ويب ثوري في binary واحد. لا يحتاج أي شيء خارجي.
 
+mod config;
 mod dashboard;
 mod metrics;
 mod middleware;
@@ -32,18 +33,23 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Serve {
-        #[arg(long, default_value = "0.0.0.0:8080")]
-        addr: String,
-        #[arg(long, default_value = "./nawa-data")]
-        data_dir: PathBuf,
-        #[arg(long, default_value = "./plugins")]
-        plugins_dir: PathBuf,
-        #[arg(long, default_value = "./static")]
-        static_dir: PathBuf,
+        #[arg(long)]
+        addr: Option<String>,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+        #[arg(long)]
+        plugins_dir: Option<PathBuf>,
+        #[arg(long)]
+        static_dir: Option<PathBuf>,
+        /// Config file path (default: ./nawa.toml).
+        #[arg(long, default_value = "./nawa.toml")]
+        config: PathBuf,
         #[arg(long)]
         no_wal_sync: bool,
     },
     Benchmark { #[arg(short, long, default_value = "100000")] ops: u32 },
+    /// Generate a default config file.
+    Init { #[arg(long, default_value = "./nawa.toml")] path: PathBuf },
     Info,
 }
 
@@ -53,27 +59,47 @@ fn main() -> anyhow::Result<()> {
         .init();
     let cli = Cli::parse();
     let result: anyhow::Result<()> = match cli.command {
-        Commands::Serve { addr, data_dir, plugins_dir, static_dir, no_wal_sync } => {
+        Commands::Serve { addr, data_dir, plugins_dir, static_dir, config: config_path, no_wal_sync } => {
+            // Load config file.
+            let mut cfg = config::Config::load(&config_path);
+            // CLI args override config file.
+            if let Some(a) = addr { cfg.addr = a; }
+            if let Some(d) = data_dir { cfg.data_dir = d.display().to_string(); }
+            if let Some(p) = plugins_dir { cfg.plugins_dir = p.display().to_string(); }
+            if let Some(s) = static_dir { cfg.static_dir = s.display().to_string(); }
+            if no_wal_sync { cfg.wal_sync = false; }
+
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(serve(addr, data_dir, plugins_dir, static_dir, !no_wal_sync))
+            rt.block_on(serve(cfg))
         }
         Commands::Benchmark { ops } => benchmark(ops),
+        Commands::Init { path } => {
+            config::Config::generate_default(&path)?;
+            println!("✓ Config file generated: {}", path.display());
+            Ok(())
+        }
         Commands::Info => { print_info(); Ok(()) }
     };
     result
 }
 
-async fn serve(addr: String, data_dir: PathBuf, plugins_dir: PathBuf, static_dir: PathBuf, wal_sync: bool) -> anyhow::Result<()> {
+async fn serve(cfg: config::Config) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
     tracing::info!("║  NAWA Web Operating System v0.1.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
+    tracing::info!("Config: {}", cfg.summary());
+
+    let data_dir = PathBuf::from(&cfg.data_dir);
+    let plugins_dir = PathBuf::from(&cfg.plugins_dir);
+    let static_dir = PathBuf::from(&cfg.static_dir);
+    let wal_sync = cfg.wal_sync;
 
     let db = Arc::new(DbEngine::open(nawa_db::DbConfig {
         data_dir: data_dir.clone(), memtable_max_size: 4 * 1024 * 1024, wal_sync,
     })?);
     tracing::info!("✓ NAWA-DB: {} keys", db.len());
 
-    let auth = Arc::new(AuthStore::new(db.clone(), AuthConfig::with_secret("nawa-os-secret-2026")));
+    let auth = Arc::new(AuthStore::new(db.clone(), AuthConfig::with_secret(&cfg.jwt_secret)));
     tracing::info!("✓ Auth: {} users", auth.user_count());
 
     let uring = Arc::new(NawaUring::new(nawa_uring::PipelineConfig::default())?);
@@ -99,11 +125,30 @@ async fn serve(addr: String, data_dir: PathBuf, plugins_dir: PathBuf, static_dir
     let router = build_router(db, auth, uring, sandbox, metrics, rate_limiter, static_server);
     tracing::info!("✓ Router: {} routes", router.len());
 
-    let addr: SocketAddr = addr.parse()?;
-    tracing::info!("\n🚀 NAWA on http://{}\n   Dashboard: http://localhost:{}\n   Register:  http://localhost:{}/register\n   Metrics:   http://localhost:{}/metrics\n", addr, addr.port(), addr.port(), addr.port());
+    let addr: SocketAddr = cfg.addr.parse()?;
+    tracing::info!("\n🚀 NAWA on http://{}", addr);
+    tracing::info!("   Dashboard: http://localhost:{}", addr.port());
+    tracing::info!("   Register:  http://localhost:{}/register", addr.port());
+    tracing::info!("   System:    http://localhost:{}/system", addr.port());
+    tracing::info!("   Metrics:   http://localhost:{}/metrics", addr.port());
+    tracing::info!("\n   Press Ctrl+C to stop\n");
 
+    // Graceful shutdown: listen for SIGTERM/SIGINT.
     let server = HttpServer::new(router, addr);
-    server.serve().await?;
+
+    // Use tokio::select to handle shutdown signal.
+    tokio::select! {
+        result = server.serve() => {
+            if let Err(e) = result {
+                tracing::error!("Server error: {e}");
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("\n⚠ Received Ctrl+C — shutting down gracefully...");
+        }
+    }
+
+    tracing::info!("✓ NAWA stopped. Goodbye!");
     Ok(())
 }
 
@@ -703,5 +748,10 @@ fn print_info() {
     println!("  • nawa-kernel:  mmap + ring buffer + zero-copy");
     println!("\nPlatform: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
     println!("License:  MIT OR Apache-2.0\n");
-    println!("Run 'nawad serve' to start.");
+    println!("Commands:");
+    println!("  nawad serve          Start the server");
+    println!("  nawad serve --config ./nawa.toml   Use config file");
+    println!("  nawad init           Generate default nawa.toml");
+    println!("  nawad benchmark      Run DB benchmarks");
+    println!("  nawad info           Show this info");
 }
