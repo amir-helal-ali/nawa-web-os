@@ -9,6 +9,7 @@ mod dashboard;
 mod errors;
 mod metrics;
 mod middleware;
+mod quantum;
 mod rate_limiter;
 mod realtime;
 mod stability;
@@ -1406,6 +1407,100 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ QUANTUM ENDPOINTS ═══
+    // GET /api/quantum — quantum engine statistics.
+    {
+        router.get("/api/quantum", move |_| async move {
+            let engine = quantum::QuantumEngine::new();
+            let stats = engine.stats().await;
+            Response::json(&serde_json::json!({
+                "quantum_engine": stats,
+                "principles": {
+                    "superposition": "multiple states evaluated simultaneously",
+                    "entanglement": "correlated state between components",
+                    "tunneling": "escape local optima in optimization",
+                    "error_correction": "data integrity through redundancy (3-repetition code)",
+                    "measurement": "probabilistic collapse for routing/balancing"
+                },
+                "gates": ["hadamard", "pauli_x", "pauli_z", "rotate"],
+                "version": "1.0"
+            }))
+        });
+    }
+
+    // GET /api/quantum/superposition — demonstrate quantum superposition.
+    {
+        router.get("/api/quantum/superposition", move |_| async move {
+            // Create a superposition of 4 states.
+            let mut sp = quantum::Superposition::uniform(vec!["state_a", "state_b", "state_c", "state_d"]);
+            let probs = sp.probabilities();
+            let collapsed = sp.measure();
+            Response::json(&serde_json::json!({
+                "states": probs.iter().map(|(s, p)| {
+                    serde_json::json!({"state": s, "probability": p})
+                }).collect::<Vec<_>>(),
+                "collapsed_to": collapsed,
+                "is_collapsed": sp.is_collapsed(),
+                "description": "Quantum superposition — multiple states exist simultaneously until measured"
+            }))
+        });
+    }
+
+    // GET /api/quantum/tunneling — demonstrate quantum tunneling.
+    {
+        router.get("/api/quantum/tunneling", move |_| async move {
+            let mut tunneler = quantum::QuantumTunneler::new(100.0, 50.0, 0.001);
+            // Simulate optimization with tunneling.
+            for _ in 0..100 {
+                let new_energy = 100.0 + quantum::QuantumMeasurement::random() * 20.0 - 10.0;
+                tunneler.try_move(new_energy);
+            }
+            let stats = tunneler.stats();
+            Response::json(&serde_json::json!({
+                "tunneling_stats": stats,
+                "description": "Quantum tunneling — escapes local optima by accepting worse states probabilistically"
+            }))
+        });
+    }
+
+    // GET /api/quantum/gates — demonstrate quantum gates.
+    {
+        router.get("/api/quantum/gates", move |_| async move {
+            let (h0, h1) = quantum::QuantumGate::hadamard(1.0, 0.0);
+            let (x0, x1) = quantum::QuantumGate::pauli_x(1.0, 0.0);
+            let (z0, z1) = quantum::QuantumGate::pauli_z(1.0, 1.0);
+            let (r0, r1) = quantum::QuantumGate::rotate(1.0, 0.0, std::f64::consts::PI / 4.0);
+            Response::json(&serde_json::json!({
+                "gates": {
+                    "hadamard": {"input": [1.0, 0.0], "output": [h0, h1], "description": "Creates uniform superposition"},
+                    "pauli_x": {"input": [1.0, 0.0], "output": [x0, x1], "description": "Quantum NOT gate (swaps amplitudes)"},
+                    "pauli_z": {"input": [1.0, 1.0], "output": [z0, z1], "description": "Phase flip gate"},
+                    "rotate": {"input": [1.0, 0.0], "output": [r0, r1], "description": "Rotation by pi/4"}
+                }
+            }))
+        });
+    }
+
+    // GET /api/quantum/qec — demonstrate quantum error correction.
+    {
+        router.get("/api/quantum/qec", move |_| async move {
+            let data = b"NAWA quantum error correction demo";
+            let mut blocks = quantum::QuantumErrorCorrection::encode(data);
+            // Inject a single error.
+            quantum::QuantumErrorCorrection::inject_error(&mut blocks[0], 5);
+            // Decode with correction.
+            let result = quantum::QuantumErrorCorrection::decode(&blocks);
+            Response::json(&serde_json::json!({
+                "original_data": String::from_utf8_lossy(data),
+                "blocks_count": blocks.len(),
+                "error_injected": true,
+                "decoded_successfully": result.is_ok(),
+                "decoded_data": result.map(|d| String::from_utf8_lossy(&d).to_string()).unwrap_or_default(),
+                "description": "Quantum Error Correction (3-repetition code with majority voting)"
+            }))
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1424,7 +1519,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /__photon__","GET /sitemap.xml","GET /robots.txt","GET /aion/stats","POST /aion/heal",
                 "GET /api/csrf-token","GET /api/audit","GET /api/health","GET /api/stability",
                 "GET /api/cache/stats","GET /api/rate-limit/stats",
-                "GET /api/traces","GET /api/version","GET /api/middleware"
+                "GET /api/traces","GET /api/version","GET /api/middleware",
+                "GET /api/quantum","GET /api/quantum/superposition","GET /api/quantum/tunneling",
+                "GET /api/quantum/gates","GET /api/quantum/qec"
             ]
         }))
     });
