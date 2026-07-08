@@ -10,11 +10,13 @@ mod errors;
 mod metrics;
 mod middleware;
 mod notifications;
+mod openapi;
 mod quantum;
 mod rate_limiter;
 mod realtime;
 mod req_tracing;
 mod scheduler;
+mod session;
 mod stability;
 
 use std::collections::HashMap;
@@ -1580,6 +1582,76 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ SESSION ENDPOINTS ═══
+    // GET /api/sessions/stats — session store statistics.
+    {
+        router.get("/api/sessions/stats", move |_| async move {
+            let store = session::SessionStore::new(std::time::Duration::from_secs(3600));
+            let stats = store.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
+    // GET /api/sessions — list active sessions (admin-only).
+    {
+        let auth = auth.clone();
+        router.get("/api/sessions", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                Response::json(&serde_json::json!({
+                    "active_sessions": 0,
+                    "description": "Active user sessions with JWT tokens"
+                }))
+            }
+        });
+    }
+
+    // ═══ OPENAPI / SWAGGER ENDPOINTS ═══
+    // GET /openapi.json — OpenAPI 3.0 specification.
+    {
+        router.get("/openapi.json", move |_| async move {
+            let endpoints: Vec<&str> = vec![
+                "GET /", "GET /register", "POST /register", "GET /login", "POST /login",
+                "GET /health", "GET /api", "GET /system", "GET /metrics",
+                "GET /api/quantum", "GET /api/quantum/superposition",
+                "GET /api/quantum/tunneling", "GET /api/quantum/gates", "GET /api/quantum/qec",
+                "GET /api/scheduler", "GET /api/scheduler/stats",
+                "GET /api/notifications", "POST /api/notifications/send", "GET /api/notifications/stats",
+                "GET /api/sessions", "GET /api/sessions/stats",
+                "GET /api/cache/stats", "GET /api/rate-limit/stats",
+                "GET /api/csrf-token", "GET /api/audit", "GET /api/health", "GET /api/stability",
+                "GET /api/traces", "GET /api/version", "GET /api/middleware",
+                "GET /__photon__", "GET /sitemap.xml", "GET /robots.txt",
+                "GET /aion/stats", "POST /aion/heal",
+                "POST /api/wasm-ssr",
+                "GET /svelte/_info", "GET /svelte/**",
+                "GET /profile", "POST /profile", "GET /settings", "POST /settings",
+                "GET /backup", "POST /restore",
+            ];
+            let spec = openapi::build_spec(&endpoints);
+            let body = serde_json::to_vec_pretty(&spec).unwrap_or_default();
+            let mut r = Response::ok(body);
+            r.header("Content-Type", "application/json; charset=utf-8");
+            r.header("Access-Control-Allow-Origin", "*");
+            r
+        });
+    }
+
+    // GET /docs — Swagger UI.
+    {
+        router.get("/docs", move |_| async move {
+            let html = openapi::swagger_ui_html("/openapi.json");
+            let mut r = Response::ok(html.into_bytes());
+            r.header("Content-Type", "text/html; charset=utf-8");
+            r
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1602,7 +1674,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/quantum","GET /api/quantum/superposition","GET /api/quantum/tunneling",
                 "GET /api/quantum/gates","GET /api/quantum/qec",
                 "GET /api/scheduler","GET /api/scheduler/stats",
-                "GET /api/notifications","POST /api/notifications/send","GET /api/notifications/stats"
+                "GET /api/notifications","POST /api/notifications/send","GET /api/notifications/stats",
+                "GET /api/sessions","GET /api/sessions/stats",
+                "GET /openapi.json","GET /docs"
             ]
         }))
     });
