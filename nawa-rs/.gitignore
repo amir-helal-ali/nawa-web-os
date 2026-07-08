@@ -29,3 +29,6 @@ examples/svelte-app/_nawa/
 
 # Release binaries (uploaded to GitHub Releases instead)
 download/
+
+# WASM SSR module build artifacts
+examples/wasm-ssr-module/target/
