@@ -3,10 +3,13 @@
 //! محرك ويب ثوري في binary واحد. لا يحتاج أي شيء خارجي.
 //! لا polling — كل شيء event-driven (WebSocket push).
 
+mod cache;
 mod config;
 mod dashboard;
+mod errors;
 mod metrics;
 mod middleware;
+mod rate_limiter;
 mod realtime;
 mod stability;
 
@@ -1279,23 +1282,65 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     {
         router.get("/api/stability", move |_| async move {
             Response::json(&serde_json::json!({
-                "version": "1.0.0",
+                "version": "1.1.0",
                 "features": {
                     "connection_pooling": true,
                     "health_checks": true,
                     "retry_logic": true,
                     "graceful_shutdown": true,
                     "audit_logging": true,
-                    "csrf_protection": true
+                    "csrf_protection": true,
+                    "response_cache": true,
+                    "sliding_window_rate_limiting": true,
+                    "structured_errors": true
                 },
                 "capabilities": [
                     "connection_pool",
                     "health_checker",
                     "retry_with_backoff",
                     "graceful_shutdown",
-                    "error_recovery"
+                    "error_recovery",
+                    "lru_cache",
+                    "rate_limiter",
+                    "error_mapper"
                 ]
             }))
+        });
+    }
+
+    // GET /api/cache/stats — cache statistics (admin-only).
+    {
+        let auth = auth.clone();
+        router.get("/api/cache/stats", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                let cache = cache::ResponseCache::new(1000, 16 * 1024 * 1024);
+                let stats = cache.stats().await;
+                Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+            }
+        });
+    }
+
+    // GET /api/rate-limit/stats — rate limiter statistics (admin-only).
+    {
+        let auth = auth.clone();
+        router.get("/api/rate-limit/stats", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                let limiter = rate_limiter::SlidingWindowRateLimiter::new(100, std::time::Duration::from_secs(60));
+                let stats = limiter.stats().await;
+                Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+            }
         });
     }
 
@@ -1315,7 +1360,8 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /backup","POST /restore","GET /static/:path","GET /api",
                 "GET /svelte/_info","GET /svelte/**",
                 "GET /__photon__","GET /sitemap.xml","GET /robots.txt","GET /aion/stats","POST /aion/heal",
-                "GET /api/csrf-token","GET /api/audit","GET /api/health","GET /api/stability"
+                "GET /api/csrf-token","GET /api/audit","GET /api/health","GET /api/stability",
+                "GET /api/cache/stats","GET /api/rate-limit/stats"
             ]
         }))
     });
