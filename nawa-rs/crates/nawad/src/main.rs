@@ -7,10 +7,12 @@ mod cache;
 mod config;
 mod dashboard;
 mod errors;
+mod feature_flags;
 mod metrics;
 mod middleware;
 mod notifications;
 mod openapi;
+mod pubsub;
 mod quantum;
 mod rate_limiter;
 mod realtime;
@@ -1652,6 +1654,84 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ PUB/SUB ENDPOINTS ═══
+    // GET /api/pubsub — pub/sub channel statistics.
+    {
+        router.get("/api/pubsub", move |_| async move {
+            let mgr = pubsub::PubSubManager::new(100);
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::json!({
+                "stats": stats,
+                "predefined_channels": [
+                    "system", "notifications", "db_changes",
+                    "user_activity", "aion_seo", "quantum"
+                ],
+                "description": "WebSocket pub/sub — topic-based message routing"
+            }))
+        });
+    }
+
+    // GET /api/pubsub/channels — list active channels.
+    {
+        router.get("/api/pubsub/channels", move |_| async move {
+            let mgr = pubsub::PubSubManager::new(100);
+            let channels = mgr.channels().await;
+            Response::json(&serde_json::json!({
+                "channels": channels,
+                "count": channels.len()
+            }))
+        });
+    }
+
+    // ═══ FEATURE FLAGS ENDPOINTS ═══
+    // GET /api/features — list all feature flags.
+    {
+        router.get("/api/features", move |_| async move {
+            let flags = feature_flags::FeatureFlags::new();
+            flags.init_defaults().await;
+            let list = flags.list().await;
+            let stats = flags.stats().await;
+            Response::json(&serde_json::json!({
+                "flags": list,
+                "stats": stats,
+                "count": list.len()
+            }))
+        });
+    }
+
+    // GET /api/features/stats — feature flag statistics.
+    {
+        router.get("/api/features/stats", move |_| async move {
+            let flags = feature_flags::FeatureFlags::new();
+            flags.init_defaults().await;
+            let stats = flags.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
+    // GET /api/features/:key — check if a specific feature is enabled.
+    {
+        router.get("/api/features/:key", move |req| {
+            let key = req.param("key").unwrap_or("").to_string();
+            async move {
+                let flags = feature_flags::FeatureFlags::new();
+                flags.init_defaults().await;
+                match flags.get(&key).await {
+                    Some(flag) => Response::json(&serde_json::to_value(&flag).unwrap_or_default()),
+                    None => {
+                        let mut r = Response::new(StatusCode(404));
+                        r.header("Content-Type", "application/json");
+                        r.body = serde_json::to_vec(&serde_json::json!({
+                            "error": "feature flag not found",
+                            "key": key
+                        })).unwrap_or_default();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1676,7 +1756,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/scheduler","GET /api/scheduler/stats",
                 "GET /api/notifications","POST /api/notifications/send","GET /api/notifications/stats",
                 "GET /api/sessions","GET /api/sessions/stats",
-                "GET /openapi.json","GET /docs"
+                "GET /openapi.json","GET /docs",
+                "GET /api/pubsub","GET /api/pubsub/channels",
+                "GET /api/features","GET /api/features/stats","GET /api/features/:key"
             ]
         }))
     });
