@@ -9,11 +9,13 @@ mod dashboard;
 mod errors;
 mod metrics;
 mod middleware;
+mod notifications;
 mod quantum;
 mod rate_limiter;
 mod realtime;
-mod stability;
 mod req_tracing;
+mod scheduler;
+mod stability;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -1501,6 +1503,83 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ SCHEDULER ENDPOINTS ═══
+    // GET /api/scheduler — list scheduled tasks + stats.
+    {
+        router.get("/api/scheduler", move |_| async move {
+            let sched = scheduler::Scheduler::new();
+            let tasks = sched.list().await;
+            let stats = sched.stats().await;
+            Response::json(&serde_json::json!({
+                "stats": stats,
+                "tasks": tasks.iter().map(scheduler::task_to_json).collect::<Vec<_>>(),
+                "count": tasks.len()
+            }))
+        });
+    }
+
+    // GET /api/scheduler/stats — scheduler statistics.
+    {
+        router.get("/api/scheduler/stats", move |_| async move {
+            let sched = scheduler::Scheduler::new();
+            let stats = sched.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
+    // ═══ NOTIFICATION ENDPOINTS ═══
+    // GET /api/notifications — notification inbox + stats.
+    {
+        router.get("/api/notifications", move |_| async move {
+            let mgr = notifications::NotificationManager::new();
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::json!({
+                "stats": stats,
+                "channels": ["in_app", "webhook", "email", "log"],
+                "priorities": ["low", "normal", "high", "critical"]
+            }))
+        });
+    }
+
+    // POST /api/notifications/send — send a notification (admin-only).
+    {
+        let auth = auth.clone();
+        router.post("/api/notifications/send", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                let body = req.body_str().to_string();
+                let notif_data: serde_json::Value = serde_json::from_str(&body)
+                    .unwrap_or(serde_json::json!({}));
+                let title = notif_data["title"].as_str().unwrap_or("Notification");
+                let message = notif_data["message"].as_str().unwrap_or("");
+                let priority = match notif_data["priority"].as_str() {
+                    Some("low") => notifications::Priority::Low,
+                    Some("high") => notifications::Priority::High,
+                    Some("critical") => notifications::Priority::Critical,
+                    _ => notifications::Priority::Normal,
+                };
+                let channels = vec![notifications::Channel::InApp, notifications::Channel::Log];
+                let mgr = notifications::NotificationManager::new();
+                let notif = mgr.send(title, message, priority, channels, None).await;
+                Response::json(&serde_json::to_value(&notif).unwrap_or_default())
+            }
+        });
+    }
+
+    // GET /api/notifications/stats — notification statistics.
+    {
+        router.get("/api/notifications/stats", move |_| async move {
+            let mgr = notifications::NotificationManager::new();
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1521,7 +1600,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/cache/stats","GET /api/rate-limit/stats",
                 "GET /api/traces","GET /api/version","GET /api/middleware",
                 "GET /api/quantum","GET /api/quantum/superposition","GET /api/quantum/tunneling",
-                "GET /api/quantum/gates","GET /api/quantum/qec"
+                "GET /api/quantum/gates","GET /api/quantum/qec",
+                "GET /api/scheduler","GET /api/scheduler/stats",
+                "GET /api/notifications","POST /api/notifications/send","GET /api/notifications/stats"
             ]
         }))
     });
