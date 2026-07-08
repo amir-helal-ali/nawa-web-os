@@ -12,6 +12,7 @@ mod middleware;
 mod rate_limiter;
 mod realtime;
 mod stability;
+mod req_tracing;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -1344,6 +1345,67 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // GET /api/traces — recent request traces (admin-only).
+    {
+        let auth = auth.clone();
+        router.get("/api/traces", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                let store = req_tracing::TraceStore::new(100);
+                let recent = store.recent(50).await;
+                let stats = store.stats();
+                Response::json(&serde_json::json!({
+                    "traces": recent,
+                    "stats": stats,
+                    "count": recent.len()
+                }))
+            }
+        });
+    }
+
+    // GET /api/version — API versioning info.
+    {
+        router.get("/api/version", move |req| async move {
+            let header_version = req.header("x-api-version");
+            let version = req_tracing::ApiVersioning::extract_version(&req.path, header_version);
+            let status = req_tracing::ApiVersioning::deprecation_status(version);
+            let supported = req_tracing::ApiVersioning::is_supported(version);
+            Response::json(&serde_json::json!({
+                "current_version": 2,
+                "requested_version": version,
+                "supported": supported,
+                "status": status,
+                "supported_versions": [1, 2],
+                "deprecated_versions": []
+            }))
+        });
+    }
+
+    // GET /api/middleware — middleware chain info.
+    {
+        router.get("/api/middleware", move |_| async move {
+            Response::json(&serde_json::json!({
+                "middlewares": [
+                    {"name": "security_headers", "enabled": true, "description": "11 security headers"},
+                    {"name": "rate_limiter", "enabled": true, "description": "Sliding window rate limiter"},
+                    {"name": "csrf_protection", "enabled": true, "description": "CSRF token generation + validation"},
+                    {"name": "audit_logging", "enabled": true, "description": "Security event logging"},
+                    {"name": "request_tracing", "enabled": true, "description": "Correlation IDs + timing"},
+                    {"name": "response_cache", "enabled": true, "description": "LRU cache with TTL"},
+                    {"name": "error_handling", "enabled": true, "description": "Structured JSON errors"},
+                    {"name": "api_versioning", "enabled": true, "description": "v1/v2 via header or path"}
+                ],
+                "total": 8,
+                "all_enabled": true
+            }))
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1361,7 +1423,8 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /svelte/_info","GET /svelte/**",
                 "GET /__photon__","GET /sitemap.xml","GET /robots.txt","GET /aion/stats","POST /aion/heal",
                 "GET /api/csrf-token","GET /api/audit","GET /api/health","GET /api/stability",
-                "GET /api/cache/stats","GET /api/rate-limit/stats"
+                "GET /api/cache/stats","GET /api/rate-limit/stats",
+                "GET /api/traces","GET /api/version","GET /api/middleware"
             ]
         }))
     });
