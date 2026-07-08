@@ -12,6 +12,7 @@ mod metrics;
 mod middleware;
 mod notifications;
 mod openapi;
+mod plugins;
 mod pubsub;
 mod quantum;
 mod rate_limiter;
@@ -20,6 +21,7 @@ mod req_tracing;
 mod scheduler;
 mod session;
 mod stability;
+mod webhooks;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -1732,6 +1734,68 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ PLUGIN ENDPOINTS ═══
+    // GET /api/plugins — list all plugins.
+    {
+        router.get("/api/plugins", move |_| async move {
+            let mgr = plugins::PluginManager::new();
+            mgr.init_builtin_plugins().await;
+            let list = mgr.list().await;
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::json!({
+                "plugins": list,
+                "stats": stats,
+                "hook_types": ["before_request", "after_request", "on_error", "on_startup", "on_shutdown", "on_auth", "on_db_write", "on_db_read", "custom"]
+            }))
+        });
+    }
+
+    // GET /api/plugins/stats — plugin statistics.
+    {
+        router.get("/api/plugins/stats", move |_| async move {
+            let mgr = plugins::PluginManager::new();
+            mgr.init_builtin_plugins().await;
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
+    // ═══ WEBHOOK ENDPOINTS ═══
+    // GET /api/webhooks — list webhooks + stats.
+    {
+        router.get("/api/webhooks", move |_| async move {
+            let mgr = webhooks::WebhookManager::new(100);
+            let hooks = mgr.list().await;
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::json!({
+                "webhooks": hooks,
+                "stats": stats,
+                "description": "Webhook system — send and receive HTTP webhooks"
+            }))
+        });
+    }
+
+    // GET /api/webhooks/stats — webhook statistics.
+    {
+        router.get("/api/webhooks/stats", move |_| async move {
+            let mgr = webhooks::WebhookManager::new(100);
+            let stats = mgr.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
+    // GET /api/webhooks/deliveries — recent deliveries.
+    {
+        router.get("/api/webhooks/deliveries", move |_| async move {
+            let mgr = webhooks::WebhookManager::new(100);
+            let deliveries = mgr.deliveries(50).await;
+            Response::json(&serde_json::json!({
+                "deliveries": deliveries,
+                "count": deliveries.len()
+            }))
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1758,7 +1822,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/sessions","GET /api/sessions/stats",
                 "GET /openapi.json","GET /docs",
                 "GET /api/pubsub","GET /api/pubsub/channels",
-                "GET /api/features","GET /api/features/stats","GET /api/features/:key"
+                "GET /api/features","GET /api/features/stats","GET /api/features/:key",
+                "GET /api/plugins","GET /api/plugins/stats",
+                "GET /api/webhooks","GET /api/webhooks/stats","GET /api/webhooks/deliveries"
             ]
         }))
     });

@@ -37,6 +37,8 @@ prometheus.workspace = true
 sha2 = { version = "0.10", features = ["oid"] }
 sha1 = "0.10"
 xxhash-rust = { workspace = true, features = ["xxh3"] }
+hmac = "0.12"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3.14"

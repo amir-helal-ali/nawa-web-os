@@ -1620,6 +1620,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "hex",
+ "hmac",
  "nawa-aion",
  "nawa-auth",
  "nawa-db",
