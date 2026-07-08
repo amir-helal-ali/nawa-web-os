@@ -1,0 +1,26 @@
+[package]
+name = "nawa-aion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AION Engine — Adaptive Intelligent Ontological Network for SEO (Knowledge Graph + Multi-format + Self-healing)"
+
+[dependencies]
+nawa-db = { path = "../nawa-db" }
+nawa-engine = { path = "../nawa-engine" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+xxhash-rust = { workspace = true, features = ["xxh3"] }
+rsa.workspace = true
+pkcs8.workspace = true
+sha2.workspace = true
+base64.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"

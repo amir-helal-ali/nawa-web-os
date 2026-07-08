@@ -1,0 +1,21 @@
+[package]
+name = "nawa-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA WASM sandbox — run user code safely"
+
+[dependencies]
+nawa-kernel = { path = "../nawa-kernel" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+wasmtime.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"

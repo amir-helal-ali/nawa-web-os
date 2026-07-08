@@ -1,0 +1,18 @@
+[package]
+name = "nawa-frontend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA Frontend Engine — SSR renderer + island hydration + streaming"
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["full", "test-util"] }

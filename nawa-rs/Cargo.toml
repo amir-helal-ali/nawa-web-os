@@ -1,0 +1,97 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nawa-kernel",
+    "crates/nawa-db",
+    "crates/nawa-http",
+    "crates/nawa-uring",
+    "crates/nawa-wasm",
+    "crates/nawa-auth",
+    "crates/nawa-frontend",
+    "crates/nawa-engine",
+    "crates/nawa-svelte",
+    "crates/nawa-aion",
+    "crates/nawad",
+    "crates/nawa-cli",
+    "examples/blog-site",
+    "examples/auth-site",
+]
+
+[workspace.package]
+version = "0.1.0-alpha"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["NAWA Project <noreply@nawa.dev>"]
+repository = "https://github.com/amir-helal-ali/nawa-web-os"
+homepage = "https://nawa.dev"
+description = "NAWA — Revolutionary Web Operating System built in Rust"
+keywords = ["web", "os", "rust", "io-uring", "zero-copy"]
+categories = ["web-programming", "os", "database"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Bytes / zero-copy
+bytes = "1.9"
+# Atomics / lock-free
+crossbeam = "0.8"
+arc-swap = "1.7"
+# Hashing (for bloom filter, DB keys)
+xxhash-rust = { version = "0.8", features = ["xxh3", "xxh64"] }
+# File system
+memmap2 = "0.9"
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+# TLS (for HTTPS — Phase 4)
+rustls = "0.23"
+rustls-pemfile = "2.2"
+tokio-rustls = "0.26"
+# WASM runtime (for sandboxed plugins)
+wasmtime = "26"
+# QUIC / HTTP-3
+quinn = "0.11"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+http = "1.1"
+bytes-utils = "0.1"
+# io_uring (Linux 5.1+)
+io-uring = "0.7"
+libc = "0.2"
+# Metrics (Prometheus format)
+prometheus = "0.13"
+# Auth (JWT + password hashing)
+sha2 = { version = "0.10", features = ["oid"] }
+hmac = "0.12"
+base64 = "0.22"
+rand = "0.8"
+hex = "0.4"
+# RSA signing (for Google Search Console OAuth JWT assertions)
+rsa = { version = "0.9", features = ["pem", "sha2"] }
+pkcs8 = { version = "0.10", features = ["std", "pem"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.bench]
+opt-level = 3
+debug = false

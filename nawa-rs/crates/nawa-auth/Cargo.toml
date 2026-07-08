@@ -1,0 +1,24 @@
+[package]
+name = "nawa-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA authentication — JWT + password hashing + RBAC"
+
+[dependencies]
+nawa-db = { path = "../nawa-db" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+base64.workspace = true
+rand.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"

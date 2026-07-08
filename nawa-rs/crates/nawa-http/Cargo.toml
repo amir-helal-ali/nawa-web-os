@@ -1,0 +1,33 @@
+[package]
+name = "nawa-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NAWA HTTP server + type-safe router"
+
+[dependencies]
+nawa-kernel = { path = "../nawa-kernel" }
+nawa-db = { path = "../nawa-db" }
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+tokio-rustls.workspace = true
+quinn = { workspace = true, optional = true }
+h3 = { workspace = true, optional = true }
+h3-quinn = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+bytes-utils = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[features]
+default = []
+http3 = ["quinn", "h3", "h3-quinn", "http", "bytes-utils"]
