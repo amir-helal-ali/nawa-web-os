@@ -1,0 +1,80 @@
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  NAWA Web Operating System — All-in-One Docker Image          ║
+# ║  صورة واحدة تُشغّل النظام بالكامل مع كل الميزات                 ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+# البناء:   docker build -t nawa-web-os .
+# التشغيل:  docker run -p 8080:8080 -p 8081:8081 nawa-web-os
+#
+# الحجم النهائي: ~50MB (scratch base) أو ~120MB (debian-slim)
+
+# ── Stage 1: بناء NAWA من المصدر ──
+FROM rust:1.96-slim AS builder
+
+# تثبيت تبعيات البناء
+RUN apt-get update && apt-get install -y \
+    git \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# إضافة wasm32 target
+RUN rustup target add wasm32-unknown-unknown
+
+# نسخ الكود المصدري
+WORKDIR /build
+COPY . .
+
+# بناء nawad binary (release)
+RUN cargo build --release -p nawad
+
+# بناء nawa-cli binary
+RUN cargo build --release -p nawa-cli
+
+# بناء WASM SSR module
+WORKDIR /build/examples/wasm-ssr-module
+RUN cargo build --release --target wasm32-unknown-unknown
+
+# ── Stage 2: الصورة النهائية (صغيرة) ──
+FROM debian:bookworm-slim AS runtime
+
+# تثبيت الحد الأدنى من التبعيات
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# إنشاء مستخدم غير جذر
+RUN useradd -m -u 1000 nawa
+
+# نسخ الـ binaries
+COPY --from=builder /build/target/release/nawad /usr/local/bin/nawad
+COPY --from=builder /build/target/release/nawa /usr/local/bin/nawa
+
+# نسخ WASM SSR module
+COPY --from=builder /build/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/nawa_ssr_demo.wasm /opt/nawa/plugins/nawa_ssr_demo.wasm
+
+# نسخ سكربت التشغيل
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# إنشاء مجلدات البيانات
+RUN mkdir -p /opt/nawa/data /opt/nawa/plugins /opt/nawa/static && \
+    chown -R nawa:nawa /opt/nawa
+
+# التبديل للمستخدم nawa
+USER nawa
+WORKDIR /opt/nawa
+
+# المنافذ
+EXPOSE 8080 8081
+
+# متغيرات البيئة
+ENV NAWA_ADDR=0.0.0.0:8080
+ENV NAWA_DATA_DIR=/opt/nawa/data
+ENV NAWA_PLUGINS_DIR=/opt/nawa/plugins
+ENV NAWA_STATIC_DIR=/opt/nawa/static
+ENV RUST_LOG=info
+
+# نقطة الدخول
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["serve"]

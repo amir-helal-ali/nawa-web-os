@@ -1,0 +1,11 @@
+# NAWA Configuration — مشروع أساسي
+# عدّل هذه القيم حسب احتياجاتك
+
+addr = "127.0.0.1:8080"
+data_dir = "./data"
+plugins_dir = "./plugins"
+static_dir = "./static"
+jwt_secret = "change-this-secret-in-production"
+rate_limit = 100
+wal_sync = true
+log_level = "info"

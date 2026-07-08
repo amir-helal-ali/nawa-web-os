@@ -1,0 +1,34 @@
+# NAWA Web Operating System — docker-compose
+# تشغيل النظام بالكامل بأمر واحد: docker-compose up
+
+version: '3.8'
+
+services:
+  nawa:
+    build:
+      context: .
+      dockerfile: Dockerfile.all-in-one
+    container_name: nawa-web-os
+    ports:
+      - "8080:8080"   # HTTP
+      - "8081:8081"   # WebSocket
+    volumes:
+      - nawa-data:/opt/nawa/data
+      - nawa-plugins:/opt/nawa/plugins
+      - ./static:/opt/nawa/static
+    environment:
+      - NAWA_ADDR=0.0.0.0:8080
+      - RUST_LOG=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  nawa-data:
+    driver: local
+  nawa-plugins:
+    driver: local
