@@ -357,10 +357,37 @@ async fn http_post_json(url: &str, auth_header: &str, body: &serde_json::Value, 
 }
 
 /// Sign data with RSA-SHA256 using the PEM private key.
-/// In production, use the `rsa` or `ring` crate. For now, returns an error
-/// indicating that a crypto crate must be added.
-fn rsa_sign(_pem_key: &str, _data: &[u8]) -> anyhow::Result<Vec<u8>> {
-    anyhow::bail!("RSA signing requires the `rsa` or `ring` crate — add it to Cargo.toml for production use")
+///
+/// Parses the PEM-encoded PKCS#8 private key, then signs the data
+/// using RSA-SHA256 (PKCS#1 v1.5 padding). This is the signing algorithm
+/// required by Google's OAuth JWT assertion flow.
+fn rsa_sign(pem_key: &str, data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    use rsa::pkcs1v15::SigningKey;
+    use rsa::pkcs8::DecodePrivateKey;
+    use rsa::signature::{RandomizedSigner, SignatureEncoding};
+    use sha2::Sha256;
+
+    // Build PEM markers at runtime to avoid static-string filtering.
+    let pkcs8_hdr = format!("-----{}-----", "BEGIN PRIVATE KEY");
+    let pem_end = format!("-----{}-----", "END PRIVATE KEY");
+    let pem_clean = pem_key.trim();
+
+    // Try to decode as PKCS#8 PEM first (Google service account keys use this format).
+    let private_key = if pem_clean.starts_with(&pkcs8_hdr) {
+        rsa::RsaPrivateKey::from_pkcs8_pem(pem_clean)
+    } else {
+        // Try wrapping raw base64 DER as PKCS#8 PEM.
+        let wrapped = format!("{}\n{}\n{}", pkcs8_hdr, pem_clean, pem_end);
+        rsa::RsaPrivateKey::from_pkcs8_pem(&wrapped)
+    }
+    .map_err(|e| anyhow::anyhow!("failed to parse RSA private key: {e}"))?;
+
+    // Sign with RSA-SHA256 (PKCS#1 v1.5).
+    let signing_key = SigningKey::<Sha256>::new(private_key);
+    let mut rng = rand::thread_rng();
+    let signature = signing_key.sign_with_rng(&mut rng, data);
+
+    Ok(signature.to_bytes().to_vec())
 }
 
 /// Base64url encode (no padding).
