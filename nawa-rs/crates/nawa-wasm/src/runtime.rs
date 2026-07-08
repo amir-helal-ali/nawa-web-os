@@ -66,10 +66,11 @@ impl Sandbox {
         engine_config.consume_fuel(true);
         engine_config.wasm_threads(false);
         engine_config.wasm_simd(true);
-        engine_config.wasm_reference_types(false);
+        engine_config.wasm_reference_types(true);
         engine_config.wasm_bulk_memory(true);
         engine_config.wasm_multi_value(true);
         engine_config.wasm_multi_memory(false);
+        engine_config.wasm_memory64(false);
         // CRITICAL: no WASI by default — plugins can't touch the filesystem.
         if !config.allow_wasi {
             engine_config.wasm_component_model(false);
@@ -248,6 +249,88 @@ impl Sandbox {
     /// Get the wasmtime engine (for SSR module instantiation).
     pub fn engine(&self) -> &wasmtime::Engine {
         &self.engine
+    }
+
+    /// Render HTML via a WASM SSR module.
+    ///
+    /// The module must export: `memory`, `alloc(size) -> ptr`, `render(props_ptr, props_len) -> html_ptr`.
+    /// The HTML output is null-terminated.
+    /// This is the core SSR (Server-Side Rendering) entry point.
+    pub fn render_ssr(&self, module_name: &str, props_json: &str) -> SandboxResult<String> {
+        use wasmtime::{Memory, Val};
+
+        let module = self.get_module(module_name)
+            .ok_or_else(|| SandboxError::NotFound(module_name.to_string()))?
+            .clone();
+
+        let mut store = wasmtime::Store::new(&self.engine, ());
+        store.set_fuel(self.config.fuel_limit)
+            .map_err(|_| SandboxError::FuelExhausted)?;
+
+        let instance = wasmtime::Instance::new(&mut store, &module, &[])
+            .map_err(|e| SandboxError::Instantiate(e.to_string()))?;
+
+        // Get exported memory.
+        let memory: Memory = instance
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| SandboxError::FunctionNotFound("memory export".into()))?;
+
+        // Get alloc function.
+        let alloc_func = instance
+            .get_func(&mut store, "alloc")
+            .ok_or_else(|| SandboxError::FunctionNotFound("alloc".into()))?;
+
+        // Get render function.
+        let render_func = instance
+            .get_func(&mut store, "render")
+            .ok_or_else(|| SandboxError::FunctionNotFound("render".into()))?;
+
+        // Allocate space for props.
+        let props_bytes = props_json.as_bytes();
+        let props_len = props_bytes.len() as i32;
+
+        let mut alloc_results = vec![Val::I32(0)];
+        alloc_func.call(&mut store, &[Val::I32(props_len)], &mut alloc_results)
+            .map_err(|e| SandboxError::Execution(format!("alloc failed: {e}")))?;
+        let props_ptr = alloc_results[0]
+            .i32()
+            .ok_or_else(|| SandboxError::Execution("alloc returned non-i32".into()))?;
+        if props_ptr == 0 {
+            return Err(SandboxError::Execution("alloc returned null pointer".into()));
+        }
+
+        // Write props to WASM memory.
+        memory.write(&mut store, props_ptr as usize, props_bytes)
+            .map_err(|e| SandboxError::Execution(format!("memory write failed: {e}")))?;
+
+        // Call render(props_ptr, props_len).
+        let mut render_results = vec![Val::I32(0)];
+        render_func.call(&mut store, &[Val::I32(props_ptr), Val::I32(props_len)], &mut render_results)
+            .map_err(|e| SandboxError::Execution(format!("render failed: {e}")))?;
+        let html_ptr = render_results[0]
+            .i32()
+            .ok_or_else(|| SandboxError::Execution("render returned non-i32".into()))?;
+        if html_ptr == 0 {
+            return Err(SandboxError::Execution("render returned null pointer".into()));
+        }
+
+        // Read null-terminated HTML from memory.
+        let mut buf = Vec::new();
+        let mut offset = html_ptr as usize;
+        let max_len = 1024 * 1024; // 1 MiB safety limit.
+        while buf.len() < max_len {
+            let mut byte = [0u8; 1];
+            memory.read(&store, offset, &mut byte)
+                .map_err(|e| SandboxError::Execution(format!("memory read failed: {e}")))?;
+            if byte[0] == 0 {
+                break;
+            }
+            buf.push(byte[0]);
+            offset += 1;
+        }
+
+        String::from_utf8(buf)
+            .map_err(|e| SandboxError::Execution(format!("invalid UTF-8: {e}")))
     }
 }
 

@@ -1,0 +1,14 @@
+/home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/deps/serde-08a38bb6942639fd.d: /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/build/serde-c2d95ca46471a3b7/out/private.rs
+
+/home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/deps/libserde-08a38bb6942639fd.rlib: /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/build/serde-c2d95ca46471a3b7/out/private.rs
+
+/home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/deps/libserde-08a38bb6942639fd.rmeta: /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/build/serde-c2d95ca46471a3b7/out/private.rs
+
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/build/serde-c2d95ca46471a3b7/out/private.rs:
+
+# env-dep:OUT_DIR=/home/z/my-project/nawa-rs/examples/wasm-ssr-module/target/wasm32-unknown-unknown/release/build/serde-c2d95ca46471a3b7/out

@@ -646,6 +646,49 @@ fn build_router(deps: RouterDeps) -> Router {
         });
     }
 
+    // ═══ WASM SSR ENDPOINT ═══
+    // POST /api/wasm-ssr → calls the WASM SSR module's render() with JSON body, returns HTML.
+    // The WASM module must export: memory, alloc(size)->ptr, render(props_ptr,props_len)->html_ptr
+    {
+        let sandbox = sandbox.clone();
+        router.post("/api/wasm-ssr", move |req| {
+            let sb_arc = sandbox.clone();
+            async move {
+                let props_json = req.body_str().to_string();
+                let sb = sb_arc.lock().await;
+
+                // Check if the SSR demo module is loaded.
+                if !sb.list().iter().any(|n| n == "nawa_ssr_demo") {
+                    let mut r = Response::new(StatusCode(404));
+                    r.header("Content-Type", "application/json");
+                    r.body = serde_json::to_vec(&serde_json::json!({
+                        "error": "WASM SSR module not loaded",
+                        "hint": "Place nawa_ssr_demo.wasm in the plugins directory"
+                    })).unwrap_or_default();
+                    return r;
+                }
+
+                // Call render_ssr() on the sandbox.
+                match sb.render_ssr("nawa_ssr_demo", &props_json) {
+                    Ok(html) => {
+                        let mut r = Response::ok(html.into_bytes());
+                        r.header("Content-Type", "text/html; charset=utf-8");
+                        r.header("X-NAWA-SSR", "wasm");
+                        r
+                    }
+                    Err(e) => {
+                        let mut r = Response::new(StatusCode(500));
+                        r.header("Content-Type", "application/json");
+                        r.body = serde_json::to_vec(&serde_json::json!({
+                            "error": format!("SSR render failed: {e}")
+                        })).unwrap_or_default();
+                        r
+                    }
+                }
+            }
+        });
+    }
+
     {
         let eb = event_bus.clone();
         router.get("/notifications/stats", move |_| {
@@ -1189,7 +1232,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
                 "GET /profile","POST /profile","GET /settings","POST /settings",
                 "POST /admin/verify","POST /admin/role","POST /admin/delete",
-                "GET /system","GET /ssr","GET /health","GET /uring","GET /metrics","GET /plugins",
+                "GET /system","GET /ssr","GET /health","GET /uring","GET /metrics","GET /plugins","POST /api/wasm-ssr",
                 "GET /notifications/stats","GET /:key","POST /:key","DELETE /:key","GET /scan/:prefix",
                 "POST /auth/register","POST /auth/login","GET /auth/me","GET /auth/users",
                 "GET /password-reset","POST /password-reset",
