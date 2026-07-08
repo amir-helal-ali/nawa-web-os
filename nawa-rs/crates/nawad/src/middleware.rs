@@ -36,8 +36,103 @@ pub const SECURITY_HEADERS: &[(&str, &str)] = &[
     ("X-Frame-Options", "DENY"),
     ("X-XSS-Protection", "1; mode=block"),
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
-    ("Permissions-Policy", "geolocation=(), microphone=(), camera=()"),
+    ("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()"),
+    ("Content-Security-Policy",
+     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"),
+    ("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload"),
+    ("Cross-Origin-Opener-Policy", "same-origin"),
+    ("Cross-Origin-Resource-Policy", "same-origin"),
+    ("X-Permitted-Cross-Domain-Policies", "none"),
 ];
+
+/// CSRF token generation and validation.
+#[allow(dead_code)]
+pub struct CsrfProtection;
+
+impl CsrfProtection {
+    /// Generate a new CSRF token (32 random hex chars).
+    pub fn generate_token() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let pid = std::process::id();
+        let mut hash = xxhash_rust::xxh3::xxh3_64(
+            format!("{nanos}{pid}{}{}", nanos.wrapping_mul(2654435761), pid).as_bytes()
+        );
+        hash = hash.wrapping_mul(0x9E3779B97F4A7C15);
+        format!("{:016x}{:016x}", hash, hash.rotate_left(32))
+    }
+
+    /// Validate a CSRF token (constant-time comparison).
+    #[allow(dead_code)]
+    pub fn validate_token(token: &str, expected: &str) -> bool {
+        if token.len() != expected.len() { return false; }
+        let mut diff: u8 = 0;
+        for (a, b) in token.bytes().zip(expected.bytes()) { diff |= a ^ b; }
+        diff == 0
+    }
+}
+
+/// Audit log entry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AuditEntry {
+    pub timestamp: String,
+    pub action: String,
+    pub user: Option<String>,
+    pub ip: String,
+    pub path: String,
+    pub method: String,
+    pub status: u16,
+    pub details: Option<String>,
+}
+
+/// Audit logger — stores security events in NAWA-DB.
+pub struct AuditLogger;
+
+impl AuditLogger {
+    #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
+    pub fn log(
+        db: &nawa_db::DbEngine,
+        action: &str,
+        user: Option<&str>,
+        ip: &str,
+        path: &str,
+        method: &str,
+        status: u16,
+        details: Option<&str>,
+    ) {
+        let entry = AuditEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            action: action.to_string(),
+            user: user.map(|s| s.to_string()),
+            ip: ip.to_string(),
+            path: path.to_string(),
+            method: method.to_string(),
+            status,
+            details: details.map(|s| s.to_string()),
+        };
+        if let Ok(json) = serde_json::to_string(&entry) {
+            let key = format!("audit:{}:{}", entry.timestamp, action);
+            let _ = db.put(key, nawa_db::Value::from_str(&json));
+        }
+    }
+
+    pub fn recent(db: &nawa_db::DbEngine, limit: usize) -> Vec<AuditEntry> {
+        let entries = db.scan_prefix("audit:", limit);
+        let mut audit_entries: Vec<AuditEntry> = entries
+            .into_iter()
+            .filter_map(|(_, v)| {
+                let s = v.display();
+                serde_json::from_str(&s).ok()
+            })
+            .collect();
+        audit_entries.reverse();
+        audit_entries
+    }
+}
 
 pub fn add_security_headers(resp: &mut nawa_http::Response) {
     for (k, v) in SECURITY_HEADERS { resp.header(k, v); }
