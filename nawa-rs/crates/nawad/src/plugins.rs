@@ -254,7 +254,7 @@ impl PluginManager {
         let _ = self.register(
             "security_logger",
             "Security Logger",
-            "1.0.0",
+            "2.2.0",
             "Logs all security-relevant requests",
             "NAWA",
             vec![HookType::BeforeRequest, HookType::OnError],
@@ -271,7 +271,7 @@ impl PluginManager {
         let _ = self.register(
             "rate_limit_checker",
             "Rate Limit Checker",
-            "1.0.0",
+            "2.2.0",
             "Pre-request rate limit validation",
             "NAWA",
             vec![HookType::BeforeRequest],
@@ -282,7 +282,7 @@ impl PluginManager {
         let _ = self.register(
             "response_compressor",
             "Response Compressor",
-            "1.0.0",
+            "2.2.0",
             "Compresses large text responses",
             "NAWA",
             vec![HookType::AfterRequest],
@@ -293,7 +293,7 @@ impl PluginManager {
         let _ = self.register(
             "db_audit",
             "Database Audit",
-            "1.0.0",
+            "2.2.0",
             "Logs all database writes for audit trail",
             "NAWA",
             vec![HookType::OnDbWrite],

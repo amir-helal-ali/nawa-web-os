@@ -1283,7 +1283,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "status": if overall { "healthy" } else { "unhealthy" },
                 "overall": overall,
                 "checks": vec![db_check],
-                "version": "1.0.0",
+                "version": "2.2.0",
                 "timestamp": chrono::Utc::now().to_rfc3339()
             });
             let mut r = Response::text(body.to_string());
@@ -1297,7 +1297,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     {
         router.get("/api/stability", move |_| async move {
             Response::json(&serde_json::json!({
-                "version": "1.1.0",
+                "version": "2.2.0",
                 "features": {
                     "connection_pooling": true,
                     "health_checks": true,
@@ -1955,7 +1955,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
-            "name":"NAWA","version":"2.0.0",
+            "name":"NAWA","version":"2.2.0",
             "description":"Revolutionary Web Operating System — zero polling, real-time push",
             "endpoints": [
                 "GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
