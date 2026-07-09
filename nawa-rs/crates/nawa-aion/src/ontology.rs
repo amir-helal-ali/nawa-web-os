@@ -341,8 +341,14 @@ pub fn generate_jsonld(entity: &Entity) -> serde_json::Value {
     if let Some(obj) = jsonld.as_object_mut() {
         if let Some(props) = entity.properties.as_object() {
             for (k, v) in props {
-                // Skip sensitive/internal fields.
-                if k == "password_hash" || k == "password" || k == "token" || k == "secret" {
+                // Skip sensitive/private fields — NEVER export to SEO/SSR.
+                // These fields must never appear in JSON-LD, sitemap, or SSR output.
+                if matches!(k.as_str(),
+                    "password_hash" | "password" | "token" | "secret" |
+                    "email" | "phone" | "address" | "ip_address" |
+                    "session_id" | "refresh_token" | "api_key" |
+                    "credit_card" | "ssn" | "private_key"
+                ) {
                     continue;
                 }
                 obj.insert(k.clone(), v.clone());
@@ -449,17 +455,23 @@ mod tests {
             properties: serde_json::json!({
                 "username": "admin",
                 "password_hash": "secret",
-                "email": "a@b.com"
+                "email": "a@b.com",
+                "phone": "+1234567890",
+                "name": "Admin User"
             }),
             last_modified: "2026-01-01".into(),
             importance: 0.7,
         };
         let jsonld = generate_jsonld(&entity);
         let s = jsonld.to_string();
+        // Public fields should be present.
         assert!(s.contains("admin"));
-        assert!(s.contains("a@b.com"));
-        assert!(!s.contains("secret"));
-        assert!(!s.contains("password_hash"));
+        assert!(s.contains("Admin User"));
+        // Private/sensitive fields must NEVER appear in SEO output.
+        assert!(!s.contains("secret"), "password_hash value leaked!");
+        assert!(!s.contains("password_hash"), "password_hash key leaked!");
+        assert!(!s.contains("a@b.com"), "email leaked to SEO!");
+        assert!(!s.contains("+1234567890"), "phone leaked to SEO!");
     }
 
     #[test]
