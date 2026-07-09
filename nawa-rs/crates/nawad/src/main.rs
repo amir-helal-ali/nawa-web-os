@@ -3,6 +3,7 @@
 //! محرك ويب ثوري في binary واحد. لا يحتاج أي شيء خارجي.
 //! لا polling — كل شيء event-driven (WebSocket push).
 
+mod acl;
 mod cache;
 mod config;
 mod cookies;
@@ -10,6 +11,7 @@ mod dashboard;
 mod errors;
 mod feature_flags;
 mod i18n;
+mod logging;
 mod metrics;
 mod middleware;
 mod notifications;
@@ -106,7 +108,7 @@ async fn serve(
     http3_port: Option<u16>,
 ) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
-    tracing::info!("║  NAWA Web Operating System v2.0.0            ║");
+    tracing::info!("║  NAWA Web Operating System v2.1.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
     tracing::info!("Config: {}", cfg.summary());
 
@@ -1174,7 +1176,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
-                    "engine": "AION v2.0.0",
+                    "engine": "AION v2.1.0",
                     "knowledge_graph": {
                         "entities": graph.entity_count(),
                         "relationships": graph.relationship_count(),
@@ -1847,6 +1849,76 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ LOGGING ENDPOINT ═══
+    // GET /api/logs — recent log entries.
+    {
+        router.get("/api/logs", move |req| async move {
+            let limit = req.query("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(50);
+            let min_level = req.query("level").and_then(logging::LogLevel::from_str);
+            let buf = logging::LogBuffer::new(1000);
+            let entries = buf.recent(limit, min_level).await;
+            let stats = buf.stats().await;
+            Response::json(&serde_json::json!({
+                "entries": entries,
+                "stats": stats,
+                "count": entries.len()
+            }))
+        });
+    }
+
+    // GET /api/logs/stats — log statistics.
+    {
+        router.get("/api/logs/stats", move |_| async move {
+            let buf = logging::LogBuffer::new(1000);
+            let stats = buf.stats().await;
+            Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+        });
+    }
+
+    // ═══ ACL ENDPOINT ═══
+    // GET /api/acl/roles — list all ACL roles.
+    {
+        router.get("/api/acl/roles", move |_| async move {
+            let mgr = acl::AclManager::new();
+            mgr.init_defaults().await;
+            let roles = mgr.list_roles().await;
+            Response::json(&serde_json::json!({
+                "roles": roles,
+                "count": roles.len()
+            }))
+        });
+    }
+
+    // GET /api/acl/permissions — list permissions for current user.
+    {
+        let auth = auth.clone();
+        router.get("/api/acl/permissions", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let mgr = acl::AclManager::new();
+                mgr.init_defaults().await;
+                match &user {
+                    Some(u) => {
+                        mgr.assign_role(&u.id, &u.role).await;
+                        let perms = mgr.user_permissions(&u.id).await;
+                        Response::json(&serde_json::json!({
+                            "user_id": u.id,
+                            "username": u.username,
+                            "role": u.role,
+                            "permissions": perms,
+                            "count": perms.len()
+                        }))
+                    }
+                    None => Response::json(&serde_json::json!({
+                        "error": "not authenticated",
+                        "permissions": []
+                    }))
+                }
+            }
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1877,7 +1949,9 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/plugins","GET /api/plugins/stats",
                 "GET /api/webhooks","GET /api/webhooks/stats","GET /api/webhooks/deliveries",
                 "GET /api/cookies","GET /api/cors",
-                "GET /api/i18n"
+                "GET /api/i18n",
+                "GET /api/logs","GET /api/logs/stats",
+                "GET /api/acl/roles","GET /api/acl/permissions"
             ]
         }))
     });
@@ -1923,7 +1997,7 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("NAWA Web Operating System v2.0.0");
+    println!("NAWA Web Operating System v2.1.0");
     println!("═══════════════════════════════════════════════");
     println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");
