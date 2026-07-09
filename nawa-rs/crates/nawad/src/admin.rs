@@ -97,7 +97,7 @@ pub fn build_dashboard(db: &nawa_db::DbEngine) -> AdminDashboard {
 
     AdminDashboard {
         system: SystemInfo {
-            version: "2.4.0".into(),
+            version: "2.5.0".into(),
             uptime: "active".into(),
             platform: format!("{} / {}", std::env::consts::OS, std::env::consts::ARCH),
             endpoints: 84,
@@ -319,7 +319,7 @@ mod tests {
     fn build_dashboard_works() {
         let db = nawa_db::DbEngine::open_in_memory();
         let dashboard = build_dashboard(&db);
-        assert_eq!(dashboard.system.version, "2.4.0");
+        assert_eq!(dashboard.system.version, "2.5.0");
         assert_eq!(dashboard.system.endpoints, 84);
         assert_eq!(dashboard.system.modules, 25);
         assert!(dashboard.realtime.websocket_enabled);

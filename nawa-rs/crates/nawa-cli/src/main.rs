@@ -700,7 +700,7 @@ fn serve_example(addr: &str) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("nawa CLI v2.4.0 (NAWA Web Operating System)");
+    println!("nawa CLI v2.5.0 (NAWA Web Operating System)");
     println!("─────────────────────────────────────────────");
     println!("Components:");
     println!("  • nawa-kernel: io_uring + mmap + zero-copy");
@@ -708,7 +708,7 @@ fn print_info() {
     println!("  • nawa-db:     MemTable + SSTable + WAL + Bloom");
     println!("  • nawa-http:   HTTP/1.1 + HTTP/3 + TLS + ACME");
     println!("  • nawa-wasm:   WASM sandbox (wasmtime)");
-    println!("  • nawad:       server binary (v2.4.0)");
+    println!("  • nawad:       server binary (v2.5.0)");
     println!();
     println!("Platform:");
     println!("  OS: {}", std::env::consts::OS);

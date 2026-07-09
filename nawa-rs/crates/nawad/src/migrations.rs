@@ -177,7 +177,7 @@ impl MigrationManager {
 
     fn migration_001_initial(&self) -> Result<(), String> {
         let _ = self.db.put("system:created_at", nawa_db::Value::from_str(&chrono::Utc::now().to_rfc3339()));
-        let _ = self.db.put("system:version", nawa_db::Value::from_str("2.4.0"));
+        let _ = self.db.put("system:version", nawa_db::Value::from_str("2.5.0"));
         Ok(())
     }
 
