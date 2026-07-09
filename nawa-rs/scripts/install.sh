@@ -111,53 +111,17 @@ if ! grep -q "\.nawa/bin" "$HOME/.bashrc" 2>/dev/null; then
     echo "export PATH=\"\$HOME/.nawa/bin:\$PATH\"" >> "$HOME/.bashrc"
 fi
 
-# 9. أمر nawa الموحد
-cat > "$DIR/bin/nawa" << 'CMD'
-#!/bin/bash
-D="$HOME/.nawa"; B="$D/bin"
-case "${1:-help}" in
-    serve) shift; exec "$B/nawad" serve "$@";;
-    new)
-        P="${2:-my-app}"; D2="$(pwd)/$P"
-        echo "🚀 إنشاء مشروع: $P"
-        mkdir -p "$D2"
-        cp -a "$D/templates/basic/." "$D2/" 2>/dev/null || true
-        mkdir -p "$D2/plugins"
-        cp "$D/plugins/nawa_ssr_demo.wasm" "$D2/plugins/" 2>/dev/null || true
-        echo "✓ تم في: $D2"
-        echo "cd $P && nawad serve"
-        echo "افتح: http://localhost:8080"
-        ;;
-    build-wasm)
-        cd "$2" && rustup target add wasm32-unknown-unknown 2>/dev/null
-        cargo build --release --target wasm32-unknown-unknown
-        echo "✓ WASM جاهز"
-        ;;
-    info) exec "$B/nawad" info;;
-    benchmark) exec "$B/nawad" benchmark "${@:2}";;
-    version) "$B/nawad" --version;;
-    update) bash -c "$(curl -fsSL https://raw.githubusercontent.com/amir-helal-ali/nawa-web-os/main/nawa-rs/scripts/install.sh)";;
-    uninstall) bash "$0" --uninstall;;
-    help|*)
-        echo "NAWA Web Operating System"
-        echo ""
-        echo "الأوامر:"
-        echo "  serve [options]     تشغيل الخادم"
-        echo "  new <name>          إنشاء مشروع جديد"
-        echo "  build-wasm <path>   بناء WASM module"
-        echo "  info                معلومات النظام"
-        echo "  benchmark [ops]     قياس الأداء"
-        echo "  version             الإصدار"
-        echo "  update              تحديث NAWA"
-        echo "  uninstall           حذف NAWA نهائياً"
-        ;;
-    esac
-CMD
+# 9. حذف أي bash wrapper قديم واستخدام الـ Rust binary مباشرة
+# (الـ Rust binary `nawa` يدعم: create, dev, serve, info, update, uninstall)
+rm -f "$DIR/bin/nawa"          # احذف أي wrapper قديم
+cp target/release/nawa "$DIR/bin/"   # انسخ الـ Rust binary الحقيقي
 chmod +x "$DIR/bin/nawa"
+s "nawa CLI جاهز: $(./target/release/nawa --version)"
 
 # 10. التحقق
 export PATH="$DIR/bin:$PATH"
 V=$(nawad --version 2>&1)
+NV=$("$DIR/bin/nawa" --version 2>&1)
 
 echo ""
 echo -e "${G}╔══════════════════════════════════════════════╗${N}"
@@ -168,15 +132,22 @@ else
 fi
 echo -e "${G}╚══════════════════════════════════════════════╝${N}"
 echo ""
-echo "  الإصدار: $V"
-echo "  الواجهة: SvelteKit (عصرية) — http://localhost:8080"
-echo "  التوثيق: http://localhost:8080/docs"
+echo "  nawad:  $V"
+echo "  nawa:   $NV"
 echo ""
 echo "  الأوامر:"
-echo "    nawa serve        — تشغيل"
-echo "    nawa new my-app   — مشروع جديد"
-echo "    nawa update       — تحديث"
+echo "    nawa new my-app   — إنشاء مشروع (Rust + Svelte)"
+echo "    nawa dev          — بناء + تشغيل (Svelte auto-build)"
+echo "    nawa serve        — تشغيل الخادم فقط"
+echo "    nawa info         — معلومات النظام"
+echo "    nawa update       — تحديث NAWA"
 echo "    nawa uninstall    — حذف كامل"
+echo ""
+echo "  تدفق سريع:"
+echo "    nawa new my-app"
+echo "    cd my-app"
+echo "    nawa dev"
+echo "    → http://localhost:8080 (واجهة Svelte تعمل تلقائياً!)"
 echo ""
 echo "  نفّذ: source ~/.bashrc"
 echo ""
