@@ -309,24 +309,61 @@ fn build_router(deps: RouterDeps) -> Router {
     let RouterDeps { db, auth, uring, sandbox, metrics, _rate_limiter, static_server, event_bus, svelte_handler } = deps;
     let mut router = Router::new();
 
-    // ═══ DASHBOARD ═══
+    // ═══ ROOT ROUTE — SvelteKit is the primary UI ═══
+    // If SvelteKit is loaded, serve it at "/". Otherwise fall back to built-in dashboard.
     {
-        let db = db.clone();
-        let auth = auth.clone();
-        let uring = uring.clone();
-        router.get("/", move |req| {
+        if let Some(ref handler) = svelte_handler {
+            let h = handler.clone();
+            let auth_clone = auth.clone();
+            let db_clone = db.clone();
+            router.get("/", move |req| {
+                let h = h.clone();
+                let auth = auth_clone.clone();
+                let db = db_clone.clone();
+                async move {
+                    let token = req.header("cookie")
+                        .and_then(|c| middleware::extract_cookie_value(c, "nawa_token"));
+                    let user = if let Some(t) = &token {
+                        auth.verify_token(t).ok()
+                            .and_then(|claims| auth.get_user(&claims.sub).ok())
+                            .and_then(|u| serde_json::to_value(&u).ok())
+                    } else { None };
+                    let keys: Vec<_> = db.scan_prefix("", 10).into_iter()
+                        .map(|(k, v)| (String::from_utf8_lossy(&k).to_string(), v.display()))
+                        .collect();
+                    let initial_state = serde_json::json!({
+                        "db_keys": keys, "db_size": db.len(),
+                        "auth": { "logged_in": token.is_some() }
+                    });
+                    let query = req.query.clone().into_iter().collect();
+                    let page = h.handle("/", query, token.as_deref(), user, initial_state);
+                    let mut r = Response::text(String::from_utf8_lossy(&page.html).to_string());
+                    r.status = StatusCode(page.status);
+                    r.header("Content-Type", page.content_type);
+                    for (k, v) in page.headers { r.header(&k, &v); }
+                    middleware::add_security_headers(&mut r);
+                    r
+                }
+            });
+        } else {
+            // Fallback: built-in dashboard.
             let db = db.clone();
             let auth = auth.clone();
             let uring = uring.clone();
-            async move {
-                let user = get_current_user(&req, &auth);
-                let html = dashboard::render_dashboard(&db, &auth, &uring, user.as_ref());
-                let mut r = Response::text(html);
-                r.header("Content-Type", "text/html; charset=utf-8");
-                middleware::add_security_headers(&mut r);
-                r
-            }
-        });
+            router.get("/", move |req| {
+                let db = db.clone();
+                let auth = auth.clone();
+                let uring = uring.clone();
+                async move {
+                    let user = get_current_user(&req, &auth);
+                    let html = dashboard::render_dashboard(&db, &auth, &uring, user.as_ref());
+                    let mut r = Response::text(html);
+                    r.header("Content-Type", "text/html; charset=utf-8");
+                    middleware::add_security_headers(&mut r);
+                    r
+                }
+            });
+        }
     }
 
     // ═══ AUTH PAGES ═══
