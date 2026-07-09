@@ -256,7 +256,7 @@ pub fn backup_db(db: &nawa_db::DbEngine) -> Vec<u8> {
         })
     }).collect();
     let json = serde_json::json!({
-        "version": "2.5.0",
+        "version": "2.5.1",
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "count": backup.len(),
         "entries": backup,

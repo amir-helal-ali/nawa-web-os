@@ -110,7 +110,7 @@ async fn serve(
     http3_port: Option<u16>,
 ) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
-    tracing::info!("║  NAWA Web Operating System v2.5.0            ║");
+    tracing::info!("║  NAWA Web Operating System v2.5.1            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
     tracing::info!("Config: {}", cfg.summary());
 
@@ -290,6 +290,52 @@ fn get_current_user(req: &nawa_http::Request, auth: &AuthStore) -> Option<User> 
     auth.get_user(&claims.sub).ok()
 }
 
+/// Return a 503 JSON error when SvelteKit UI is not loaded.
+/// Used as a fallback for UI routes (/, /register, /login, /profile, /settings)
+/// when the user hasn't built the SvelteKit UI yet.
+async fn async_move_no_svelte() -> nawa_http::Response {
+    let mut r = Response::json(&serde_json::json!({
+        "error": "SvelteKit UI not loaded",
+        "hint": "Run 'nawa dev' to build and serve the SvelteKit UI automatically, or run 'cd ui && npm install && npm run build' manually.",
+        "version": "2.5.1"
+    }));
+    r.status = StatusCode(503);
+    r.header("Content-Type", "application/json");
+    r
+}
+
+/// Serve a SvelteKit route with auth context and DB initial state.
+fn serve_svelte_route(
+    handler: &nawa_svelte::SvelteHandler,
+    path: &str,
+    req: &nawa_http::Request,
+    auth: &AuthStore,
+    db: &DbEngine,
+) -> nawa_http::Response {
+    let token = req.header("cookie")
+        .and_then(|c| middleware::extract_cookie_value(c, "nawa_token"));
+    let user = if let Some(t) = &token {
+        auth.verify_token(t).ok()
+            .and_then(|claims| auth.get_user(&claims.sub).ok())
+            .and_then(|u| serde_json::to_value(&u).ok())
+    } else { None };
+    let keys: Vec<_> = db.scan_prefix("", 10).into_iter()
+        .map(|(k, v)| (String::from_utf8_lossy(&k).to_string(), v.display()))
+        .collect();
+    let initial_state = serde_json::json!({
+        "db_keys": keys, "db_size": db.len(),
+        "auth": { "logged_in": token.is_some() }
+    });
+    let query = req.query.clone().into_iter().collect();
+    let page = handler.handle(path, query, token.as_deref(), user, initial_state);
+    let mut r = Response::text(String::from_utf8_lossy(&page.html).to_string());
+    r.status = StatusCode(page.status);
+    r.header("Content-Type", page.content_type);
+    for (k, v) in page.headers { r.header(&k, &v); }
+    middleware::add_security_headers(&mut r);
+    r
+}
+
 /// All shared state passed into the router builder.
 /// Grouped into a struct to keep the function signature under clippy's
 /// `too many arguments` threshold.
@@ -309,8 +355,9 @@ fn build_router(deps: RouterDeps) -> Router {
     let RouterDeps { db, auth, uring, sandbox, metrics, _rate_limiter, static_server, event_bus, svelte_handler } = deps;
     let mut router = Router::new();
 
-    // ═══ ROOT ROUTE — SvelteKit is the primary UI ═══
-    // If SvelteKit is loaded, serve it at "/". Otherwise fall back to built-in dashboard.
+    // ═══ ROOT ROUTE — SvelteKit is the ONLY UI ═══
+    // No HTML fallback. If SvelteKit is not loaded, return a clear error JSON
+    // instructing the user to build the UI or run `nawa dev`.
     {
         if let Some(ref handler) = svelte_handler {
             let h = handler.clone();
@@ -346,33 +393,93 @@ fn build_router(deps: RouterDeps) -> Router {
                 }
             });
         } else {
-            // Fallback: built-in dashboard.
-            let db = db.clone();
-            let auth = auth.clone();
-            let uring = uring.clone();
-            router.get("/", move |req| {
-                let db = db.clone();
-                let auth = auth.clone();
-                let uring = uring.clone();
-                async move {
-                    let user = get_current_user(&req, &auth);
-                    let html = dashboard::render_dashboard(&db, &auth, &uring, user.as_ref());
-                    let mut r = Response::text(html);
-                    r.header("Content-Type", "text/html; charset=utf-8");
-                    middleware::add_security_headers(&mut r);
-                    r
-                }
+            // No SvelteKit UI loaded — return clear error JSON (NOT HTML).
+            // The user must run `nawa dev` or build the SvelteKit UI first.
+            router.get("/", move |_| async move {
+                let mut r = Response::json(&serde_json::json!({
+                    "error": "SvelteKit UI not loaded",
+                    "hint": "Run 'nawa dev' to build and serve the SvelteKit UI automatically, or run 'cd ui && npm install && npm run build' manually.",
+                    "version": "2.5.1"
+                }));
+                r.status = StatusCode(503);
+                r.header("Content-Type", "application/json");
+                r
             });
         }
     }
 
-    // ═══ AUTH PAGES ═══
-    router.get("/register", move |_| async {
-        let mut r = Response::text(dashboard::render_register());
-        r.header("Content-Type", "text/html; charset=utf-8");
-        r
-    });
+    // ═══ AUTH PAGES — served by SvelteKit if available, otherwise JSON error ═══
+    // /register, /login, /profile, /settings are all handled by the SvelteKit UI
+    // (SPA routing). The POST handlers below handle the actual form submissions.
+    {
+        let handler = svelte_handler.clone();
+        let auth_clone = auth.clone();
+        let db_clone = db.clone();
+        router.get("/register", move |req| {
+            let handler = handler.clone();
+            let auth = auth_clone.clone();
+            let db = db_clone.clone();
+            async move {
+                match handler {
+                    Some(h) => serve_svelte_route(&h, "/register", &req, &auth, &db),
+                    None => async_move_no_svelte().await,
+                }
+            }
+        });
+    }
 
+    {
+        let handler = svelte_handler.clone();
+        let auth_clone = auth.clone();
+        let db_clone = db.clone();
+        router.get("/login", move |req| {
+            let handler = handler.clone();
+            let auth = auth_clone.clone();
+            let db = db_clone.clone();
+            async move {
+                match handler {
+                    Some(h) => serve_svelte_route(&h, "/login", &req, &auth, &db),
+                    None => async_move_no_svelte().await,
+                }
+            }
+        });
+    }
+
+    {
+        let handler = svelte_handler.clone();
+        let auth_clone = auth.clone();
+        let db_clone = db.clone();
+        router.get("/profile", move |req| {
+            let handler = handler.clone();
+            let auth = auth_clone.clone();
+            let db = db_clone.clone();
+            async move {
+                match handler {
+                    Some(h) => serve_svelte_route(&h, "/profile", &req, &auth, &db),
+                    None => async_move_no_svelte().await,
+                }
+            }
+        });
+    }
+
+    {
+        let handler = svelte_handler.clone();
+        let auth_clone = auth.clone();
+        let db_clone = db.clone();
+        router.get("/settings", move |req| {
+            let handler = handler.clone();
+            let auth = auth_clone.clone();
+            let db = db_clone.clone();
+            async move {
+                match handler {
+                    Some(h) => serve_svelte_route(&h, "/settings", &req, &auth, &db),
+                    None => async_move_no_svelte().await,
+                }
+            }
+        });
+    }
+
+    // POST /register — form submission (works with or without SvelteKit)
     {
         let auth = auth.clone();
         let _eb = event_bus.clone();
@@ -396,7 +503,7 @@ fn build_router(deps: RouterDeps) -> Router {
                         r
                     }
                     Err(e) => {
-                        let mut r = Response::text(dashboard::render_error(&e.to_string(), "/register"));
+                        let mut r = Response::json(&serde_json::json!({"error": e.to_string(), "redirect": "/register"})); r.status = StatusCode(400);
                         r.header("Content-Type", "text/html; charset=utf-8");
                         r
                     }
@@ -405,12 +512,7 @@ fn build_router(deps: RouterDeps) -> Router {
         });
     }
 
-    router.get("/login", move |_| async {
-        let mut r = Response::text(dashboard::render_login());
-        r.header("Content-Type", "text/html; charset=utf-8");
-        r
-    });
-
+    // POST /login — form submission (GET /login is handled by SvelteKit above)
     {
         let auth = auth.clone();
         let eb = event_bus.clone();
@@ -433,7 +535,7 @@ fn build_router(deps: RouterDeps) -> Router {
                         r
                     }
                     Err(e) => {
-                        let mut r = Response::text(dashboard::render_error(&e.to_string(), "/login"));
+                        let mut r = Response::json(&serde_json::json!({"error": e.to_string(), "redirect": "/login"})); r.status = StatusCode(400);
                         r.header("Content-Type", "text/html; charset=utf-8");
                         r
                     }
@@ -449,28 +551,7 @@ fn build_router(deps: RouterDeps) -> Router {
         r
     });
 
-    // ═══ PROFILE ═══
-    {
-        let auth = auth.clone();
-        router.get("/profile", move |req| {
-            let auth = auth.clone();
-            async move {
-                match get_current_user(&req, &auth) {
-                    Some(user) => {
-                        let mut r = Response::text(dashboard::render_profile(&user));
-                        r.header("Content-Type", "text/html; charset=utf-8");
-                        r
-                    }
-                    None => {
-                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
-                        r.header("Content-Type", "text/html");
-                        r
-                    }
-                }
-            }
-        });
-    }
-
+    // ═══ PROFILE (POST handler — GET is handled by SvelteKit above) ═══
     {
         let auth = auth.clone();
         let db = db.clone();
@@ -506,33 +587,7 @@ fn build_router(deps: RouterDeps) -> Router {
         });
     }
 
-    // ═══ ADMIN ═══
-    {
-        let auth = auth.clone();
-        router.get("/settings", move |req| {
-            let auth = auth.clone();
-            async move {
-                match get_current_user(&req, &auth) {
-                    Some(u) if u.role == "admin" => {
-                        let mut r = Response::text(dashboard::render_settings(&auth, &u));
-                        r.header("Content-Type", "text/html; charset=utf-8");
-                        r
-                    }
-                    Some(_) => {
-                        let mut r = Response::text(dashboard::render_error("صلاحية الأدمن مطلوبة", "/"));
-                        r.header("Content-Type", "text/html; charset=utf-8");
-                        r
-                    }
-                    None => {
-                        let mut r = Response::text(r#"<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>"#);
-                        r.header("Content-Type", "text/html");
-                        r
-                    }
-                }
-            }
-        });
-    }
-
+    // ═══ ADMIN (POST handler — GET /settings is handled by SvelteKit above) ═══
     {
         let auth = auth.clone();
         let eb = event_bus.clone();
@@ -551,8 +606,7 @@ fn build_router(deps: RouterDeps) -> Router {
                         if let Some(e) = form.get("jwt_expiry_secs").and_then(|v| v.parse::<u64>().ok()) { s.jwt_expiry_secs = e; }
                         let _ = auth.update_settings(&u.id, &s);
                         eb.publish(realtime::Notification::new("settings_updated", serde_json::json!({"project": s.project_name})));
-                        let mut r = Response::text(dashboard::render_settings(&auth, &u));
-                        r.header("Content-Type", "text/html; charset=utf-8");
+                        let mut r = Response::json(&serde_json::json!({"status": "ok", "message": "settings updated"}));
                         r
                     }
                     _ => {
@@ -638,8 +692,14 @@ fn build_router(deps: RouterDeps) -> Router {
             let auth = auth.clone();
             let uring = uring.clone();
             async move {
-                let mut r = Response::text(dashboard::render_system(&db, &auth, &uring));
-                r.header("Content-Type", "text/html; charset=utf-8");
+                // Return JSON system info (no HTML — SvelteKit handles UI)
+                let mut r = Response::json(&serde_json::json!({
+                    "version": "2.5.1",
+                    "db_keys": db.len(),
+                    "users": auth.user_count(),
+                    "io_uring": uring.is_real_uring(),
+                    "components": ["nawa-db", "nawa-http", "nawa-auth", "nawa-uring", "nawa-wasm", "nawa-svelte", "nawa-aion"]
+                }));
                 r
             }
         });
@@ -929,18 +989,24 @@ fn build_router(deps: RouterDeps) -> Router {
         });
     }
 
-    // ═══ PASSWORD RESET ═══
+    // ═══ PASSWORD RESET (API — UI is handled by SvelteKit) ═══
     router.get("/password-reset", move |_| async {
-        let mut r = Response::text(dashboard::render_password_reset());
-        r.header("Content-Type", "text/html; charset=utf-8");
+        // GET returns JSON status — the form is rendered by SvelteKit
+        let mut r = Response::json(&serde_json::json!({
+            "endpoint": "/password-reset",
+            "method": "POST",
+            "fields": ["email"]
+        }));
         r
     });
 
     router.post("/password-reset", move |req| async move {
         let form = parse_form(req.body_str());
         let email = form.get("email").map(|s| s.as_str()).unwrap_or("");
-        let mut r = Response::text(dashboard::render_password_reset_confirm(email));
-        r.header("Content-Type", "text/html; charset=utf-8");
+        let mut r = Response::json(&serde_json::json!({
+            "status": "ok",
+            "message": format!("if email {} exists, a reset link has been sent", email)
+        }));
         r
     });
 
@@ -1261,7 +1327,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
-                    "engine": "AION v2.5.0",
+                    "engine": "AION v2.5.1",
                     "knowledge_graph": {
                         "entities": graph.entity_count(),
                         "relationships": graph.relationship_count(),
@@ -1367,7 +1433,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "status": if overall { "healthy" } else { "unhealthy" },
                 "overall": overall,
                 "checks": vec![db_check],
-                "version": "2.5.0",
+                "version": "2.5.1",
                 "timestamp": chrono::Utc::now().to_rfc3339()
             });
             let mut r = Response::text(body.to_string());
@@ -1381,7 +1447,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     {
         router.get("/api/stability", move |_| async move {
             Response::json(&serde_json::json!({
-                "version": "2.5.0",
+                "version": "2.5.1",
                 "features": {
                     "connection_pooling": true,
                     "health_checks": true,
@@ -2099,7 +2165,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
-            "name":"NAWA","version":"2.5.0",
+            "name":"NAWA","version":"2.5.1",
             "description":"Revolutionary Web Operating System — zero polling, real-time push",
             "endpoints": [
                 "GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
@@ -2176,7 +2242,7 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("NAWA Web Operating System v2.5.0");
+    println!("NAWA Web Operating System v2.5.1");
     println!("═══════════════════════════════════════════════");
     println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");

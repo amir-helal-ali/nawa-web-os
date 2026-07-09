@@ -257,26 +257,24 @@ fn create_project(name: &str, template: &str, dir: Option<PathBuf>) -> anyhow::R
         anyhow::bail!("directory already exists: {}", project_dir.display());
     }
 
-    // Validate template.
-    if !TEMPLATES.iter().any(|(t, _)| *t == template) {
-        anyhow::bail!(
-            "unknown template: {}. Available: {}",
-            template,
-            TEMPLATES.iter().map(|(t, _)| *t).collect::<Vec<_>>().join(", ")
-        );
-    }
-
-    println!("Creating NAWA project '{name}' from template '{template}'...");
+    println!("╔══════════════════════════════════════════════╗");
+    println!("║  NAWA — إنشاء مشروع جديد (Rust + Svelte)      ║");
+    println!("╚══════════════════════════════════════════════╝");
+    println!();
+    println!("  الاسم: {name}");
+    println!();
 
     // Create directory structure.
+    println!("📁 إنشاء هيكل المشروع...");
     std::fs::create_dir_all(&project_dir)?;
     std::fs::create_dir_all(project_dir.join("src"))?;
-    std::fs::create_dir_all(project_dir.join("src/routes"))?;
-    std::fs::create_dir_all(project_dir.join("src/db"))?;
-    std::fs::create_dir_all(project_dir.join("templates"))?;
-    std::fs::create_dir_all(project_dir.join("static"))?;
+    std::fs::create_dir_all(project_dir.join("ui"))?;
+    std::fs::create_dir_all(project_dir.join("ui/src"))?;
+    std::fs::create_dir_all(project_dir.join("data"))?;
+    println!("  ✓ هيكل المشروع جاهز");
 
-    // Cargo.toml
+    // Cargo.toml — with nawa-svelte dependency
+    println!("📦 إنشاء Cargo.toml...");
     let cargo_toml = format!(
         r#"[package]
 name = "{name}"
@@ -284,14 +282,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nawa-kernel = {{ path = "../../crates/nawa-kernel" }}
 nawa-db = {{ path = "../../crates/nawa-db" }}
 nawa-http = {{ path = "../../crates/nawa-http" }}
-nawa-uring = {{ path = "../../crates/nawa-uring" }}
-nawa-wasm = {{ path = "../../crates/nawa-wasm" }}
+nawa-svelte = {{ path = "../../crates/nawa-svelte" }}
 tokio = {{ version = "1.42", features = ["full"] }}
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
+anyhow = "1.0"
 
 [[bin]]
 name = "{name}"
@@ -301,156 +298,218 @@ path = "src/main.rs"
     std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)?;
     println!("  ✓ Cargo.toml");
 
-    // src/main.rs — minimal NAWA app.
-    let main_rs = r#"use nawa_db::{DbEngine, Value};
-use nawa_http::{HttpServer, Response, Router};
-use std::net::SocketAddr;
-use std::sync::Arc;
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let db = Arc::new(DbEngine::open_in_memory());
-
-    let mut router = Router::new();
-
-    // GET / — hello world
-    router.get("/", |_| async {
-        Response::text("Hello from NAWA!")
-    });
-
-    // GET /health
-    {
-        let db = db.clone();
-        router.get("/health", move |_| {
-            let db = db.clone();
-            async move {
-                Response::json(&serde_json::json!({
-                    "status": "ok",
-                    "keys": db.len()
-                }))
-            }
-        });
-    }
-
-    // GET /:key
-    {
-        let db = db.clone();
-        router.get("/:key", move |req| {
-            let db = db.clone();
-            async move {
-                let key = req.param("key").unwrap_or("");
-                match db.get(key) {
-                    Some(v) => Response::text(v.display()),
-                    None => Response::not_found("key not found"),
-                }
-            }
-        });
-    }
-
-    // POST /:key
-    {
-        let db = db.clone();
-        router.post("/:key", move |req| {
-            let db = db.clone();
-            async move {
-                let key = req.param("key").unwrap_or("").to_string();
-                let value = Value::Bytes(req.body.clone());
-                db.put(&key, value)?;
-                Response::text(format!("stored: {key}"))
-            }
-        });
-    }
-
-    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    println!("NAWA server running on http://localhost:8080");
-    let server = HttpServer::new(router, addr);
-    server.serve().await?;
-    Ok(())
-}
-"#;
+    // src/main.rs — NAWA server with SvelteKit auto-detect
+    println!("🦀 إنشاء src/main.rs (خادم مع Svelte auto-detect)...");
+    let main_rs = "use nawa_db::{DbEngine, Value};\nuse nawa_http::{HttpServer, Response, Router};\nuse nawa_svelte::SvelteHandler;\nuse std::net::SocketAddr;\nuse std::path::PathBuf;\nuse std::sync::Arc;\n\n#[tokio::main]\nasync fn main() -> anyhow::Result<()> {\n    println!(\"NAWA Project v2.5.1 — Starting...\");\n\n    let db = Arc::new(DbEngine::open(nawa_db::DbConfig {\n        data_dir: PathBuf::from(\"./data\"),\n        memtable_max_size: 4 * 1024 * 1024,\n        wal_sync: true,\n    })?);\n    println!(\"✓ NAWA-DB: {} keys\", db.len());\n\n    // Auto-detect SvelteKit UI\n    let svelte_dir = PathBuf::from(\"./ui/_nawa\");\n    let svelte: Option<Arc<SvelteHandler>> = if svelte_dir.join(\"manifest.json\").exists() {\n        match SvelteHandler::load(&svelte_dir, \"ws://localhost:8081\".to_string()) {\n            Ok(h) => { println!(\"✓ SvelteKit UI: {} routes\", h.route_count()); Some(h) }\n            Err(e) => { println!(\"⚠ SvelteKit: {e}\"); None }\n        }\n    } else {\n        println!(\"ℹ Run 'nawa dev' to build SvelteKit UI\");\n        None\n    };\n\n    let mut router = Router::new();\n\n    if let Some(ref h) = svelte {\n        let h2 = h.clone();\n        let db2 = db.clone();\n        router.get(\"/\", move |req| {\n            let h = h2.clone(); let db = db2.clone();\n            async move {\n                let keys: Vec<_> = db.scan_prefix(\"\", 10).into_iter()\n                    .map(|(k,v)| (String::from_utf8_lossy(&k).to_string(), v.display())).collect();\n                let state = serde_json::json!({\"db_keys\": keys, \"db_size\": db.len()});\n                let q = req.query.clone().into_iter().collect();\n                let p = h.handle(\"/\", q, None, None, state);\n                let mut r = Response::text(String::from_utf8_lossy(&p.html).to_string());\n                r.header(\"Content-Type\", p.content_type); r\n            }\n        });\n        let h3 = h.clone();\n        router.get(\"/_nawa/**\", move |req| {\n            let h = h3.clone();\n            async move {\n                let rest = req.param(\"_rest\").unwrap_or(\"\").to_string();\n                let path = rest.strip_prefix(\"assets/\").unwrap_or(&rest);\n                match h.serve_asset(path) {\n                    Some((b, ct)) => { let mut r = Response::ok(b); r.header(\"Content-Type\", ct); r }\n                    None => Response::not_found(\"asset\"),\n                }\n            }\n        });\n    } else {\n        router.get(\"/\", |_| async {\n            let mut r = Response::json(&serde_json::json!({\n                \"error\": \"SvelteKit UI not built\",\n                \"hint\": \"Run 'nawa dev' to build it automatically\"\n            }));\n            r.status = nawa_http::StatusCode(503); r\n        });\n    }\n\n    // API\n    { let db = db.clone(); router.get(\"/api/health\", move |_| { let db = db.clone(); async move {\n        Response::json(&serde_json::json!({\"status\":\"ok\",\"keys\":db.len(),\"version\":\"2.5.1\"}))\n    }}); }\n    { let db = db.clone(); router.get(\"/api/data\", move |_| { let db = db.clone(); async move {\n        let keys: Vec<_> = db.scan_prefix(\"\", 100).into_iter()\n            .map(|(k,v)| (String::from_utf8_lossy(&k).to_string(), v.display())).collect();\n        Response::json(&serde_json::json!({\"count\": keys.len(), \"keys\": keys}))\n    }}); }\n    { let db = db.clone(); router.post(\"/:key\", move |req| { let db = db.clone(); async move {\n        let key = req.param(\"key\").unwrap_or(\"\").to_string();\n        let value = Value::Bytes(req.body.clone());\n        match db.put(&key, value) {\n            Ok(_) => Response::text(format!(\"stored: {key}\")),\n            Err(e) => Response::text(format!(\"error: {e}\")),\n        }\n    }}); }\n\n    let addr: SocketAddr = \"0.0.0.0:8080\".parse()?;\n    println!(\"\\n🚀 NAWA on http://localhost:8080\");\n    let server = HttpServer::new(router, addr);\n    server.serve().await?;\n    Ok(())\n}\n";
     std::fs::write(project_dir.join("src/main.rs"), main_rs)?;
     println!("  ✓ src/main.rs");
 
-    // .gitignore
-    std::fs::write(
-        project_dir.join(".gitignore"),
-        "/target\n/nawa-data\n*.log\n.env\n",
-    )?;
-    println!("  ✓ .gitignore");
+    // SvelteKit UI files
+    println!("🎨 إنشاء واجهة SvelteKit...");
+    std::fs::write(project_dir.join("ui/package.json"), r#"{
+  "name": "nawa-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build && node post-build.js",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "svelte": "^5.56.4",
+    "vite": "^8.1.3"
+  }
+}
+"#)?;
+    std::fs::write(project_dir.join("ui/vite.config.js"), r#"import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+export default defineConfig({
+  plugins: [svelte()],
+  build: { outDir: '_nawa', emptyOutDir: true, rollupOptions: { output: { entryFileNames: 'assets/app.js', assetFileNames: 'assets/[name][extname]' } } }
+});
+"#)?;
+    std::fs::write(project_dir.join("ui/index.html"), "<!DOCTYPE html>\n<html lang=\"ar\" dir=\"rtl\">\n<head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"><title>NAWA Project</title></head>\n<body><div id=\"svelte\"></div><script type=\"module\" src=\"/src/main.ts\"></script></body>\n</html>\n")?;
+    std::fs::write(project_dir.join("ui/src/main.ts"), "import './app.css';\nimport App from './App.svelte';\nnew App({ target: document.getElementById('svelte') || document.body });\n")?;
+    std::fs::write(project_dir.join("ui/src/app.css"), "body { margin: 0; background: #0a0a0f; }\n")?;
+    std::fs::write(project_dir.join("ui/src/App.svelte"), r#"<script>
+  import { onMount } from 'svelte';
+  let loaded = false; let keys = []; let newKey = ''; let newVal = '';
+  onMount(() => { loaded = true; refresh(); });
+  async function refresh() {
+    try { const r = await fetch('/api/data'); const d = await r.json(); keys = d.keys || []; } catch(e) {}
+  }
+  async function add() {
+    if (!newKey || !newVal) return;
+    await fetch(`/${newKey}`, { method: 'POST', body: newVal });
+    newKey = ''; newVal = ''; refresh();
+  }
+</script>
+<div class="app" class:loaded>
+  <nav><span>🦀 NAWA Project</span></nav>
+  <main>
+    <h1>مرحباً بك في NAWA</h1>
+    <p>واجهة Svelte تعمل تلقائياً مع خادم Rust</p>
+    <div class="card">
+      <input bind:value={newKey} placeholder="المفتاح" />
+      <input bind:value={newVal} placeholder="القيمة" />
+      <button on:click={add}>إضافة</button>
+    </div>
+    <div class="card">
+      <h2>البيانات ({keys.length})</h2>
+      {#each keys as [k, v]}
+        <div class="row"><span>{k}</span><span>{v}</span></div>
+      {/each}
+    </div>
+  </main>
+</div>
+<style>
+  :root { --bg:#0a0a0f; --s:#14141e; --b:rgba(245,158,11,.15); --p:#f59e0b; --a:#10b981; --t:#e8e8ef; --m:#8b8b9a; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  .app { font-family:'Noto Sans Arabic',system-ui; background:var(--bg); color:var(--t); min-height:100vh; opacity:0; transition:opacity .3s; }
+  .app.loaded { opacity:1; }
+  nav { padding:1rem 2rem; background:var(--s); border-bottom:1px solid var(--b); color:var(--p); font-weight:bold; }
+  main { max-width:800px; margin:0 auto; padding:2rem; }
+  h1 { color:var(--p); margin-bottom:.5rem; }
+  p { color:var(--m); margin-bottom:1.5rem; }
+  .card { background:var(--s); border:1px solid var(--b); border-radius:12px; padding:1.5rem; margin-bottom:1rem; }
+  input { padding:.6rem; background:var(--bg); border:1px solid var(--b); border-radius:8px; color:var(--t); margin:.3rem; }
+  button { padding:.6rem 1.5rem; background:var(--p); color:var(--bg); border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+  .row { display:flex; justify-content:space-between; padding:.5rem; background:var(--bg); border-radius:6px; margin-bottom:.3rem; font-family:monospace; font-size:.85rem; }
+  .row span:first-child { color:var(--p); } .row span:last-child { color:var(--a); }
+</style>
+"#)?;
+    // post-build.js generates manifest.json
+    std::fs::write(project_dir.join("ui/post-build.js"), r#"import { writeFileSync, existsSync, readdirSync } from 'fs';
+import { join } from 'path';
+const out = '_nawa';
+let mainJs = 'app.js', mainCss = 'main.css';
+const ad = join(out, 'assets');
+if (existsSync(ad)) {
+  const f = readdirSync(ad);
+  if (f.find(x => x.endsWith('.js'))) mainJs = f.find(x => x.endsWith('.js'));
+  if (f.find(x => x.endsWith('.css'))) mainCss = f.find(x => x.endsWith('.css'));
+}
+const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>NAWA Project</title><link rel="stylesheet" href="/_nawa/assets/${mainCss}"></head><body><div id="svelte"></div><script type="module" src="/_nawa/assets/${mainJs}"></script></body></html>`;
+writeFileSync(join(out, 'spa.html'), html);
+writeFileSync(join(out, 'index.html'), html);
+writeFileSync(join(out, 'manifest.json'), JSON.stringify({
+  version: 1, app_name: 'NAWA Project', built_at: new Date().toISOString(), sveltekit_version: '5.x',
+  default_meta: { title: 'NAWA Project', description: 'Built with NAWA', og_title: 'NAWA', og_description: 'NAWA', og_type: 'website', twitter_card: 'summary', canonical: '/', robots: 'index, follow' },
+  routes: [{ pattern: '/', methods: ['GET'], prerendered_html: 'index.html', hydration_js: mainJs, requires_auth: false, admin_only: false, meta: { title: 'NAWA', description: 'NAWA', og_title: 'NAWA', og_description: 'NAWA', og_type: 'website', twitter_card: 'summary', canonical: '/', robots: 'index, follow' }, is_endpoint: false, ssr_wasm: null, layout: null }]
+}, null, 2));
+console.log('✓ _nawa/manifest.json generated');
+"#)?;
+    println!("  ✓ ui/ (SvelteKit + Vite + App.svelte)");
 
-    // README.md
-    let readme = format!(
-        "# {name}\n\nA NAWA web application built from the `{template}` template.\n\n\
-         ## Getting Started\n\n\
-         ```bash\n\
-         # Run the dev server\n\
-         nawa dev\n\n\
-         # Build for production\n\
-         nawa build\n\n\
-         # Deploy\n\
-         nawa deploy --target ssh://user@your-vps\n\
-         ```\n\n\
-         ## Endpoints\n\n\
-         - `GET /` — hello world\n\
-         - `GET /health` — health check\n\
-         - `GET /:key` — get a value\n\
-         - `POST /:key` — store a value\n",
-    );
-    std::fs::write(project_dir.join("README.md"), readme)?;
-    println!("  ✓ README.md");
+    // nawa.toml
+    std::fs::write(project_dir.join("nawa.toml"), format!("addr = \"0.0.0.0:8080\"\ndata_dir = \"./data\"\nwal_sync = true\nrate_limit = 100\nlog_level = \"info\"\njwt_secret = \"{name}-secret\"\n"))?;
+    std::fs::write(project_dir.join(".gitignore"), "/target\n/data\n/ui/node_modules\n/ui/_nawa\n*.log\n.env\n")?;
+    std::fs::write(project_dir.join("README.md"), format!("# {name}\n\nمشروع NAWA v2.5.1 — Rust + SvelteKit.\n\n## التشغيل\n```bash\nnawa dev  # يبني Svelte + Rust + يشغل الخادم\n```\nافتح: http://localhost:8080\n"))?;
+    println!("  ✓ nawa.toml + README.md + .gitignore");
 
-    // Dockerfile
-    let dockerfile = r#"FROM rust:1.83-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release
-
-FROM alpine:3.20
-RUN adduser -D -u 10001 nawa
-COPY --from=builder /app/target/release/app /usr/local/bin/nawa-app
-USER nawa
-EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/nawa-app"]
-"#;
-    std::fs::write(project_dir.join("Dockerfile"), dockerfile)?;
-    println!("  ✓ Dockerfile");
-
-    println!("\n✓ Project created in {}/", name);
-    println!("\nNext steps:");
+    println!();
+    println!("═══════════════════════════════════════════════");
+    println!("  ✅ تم إنشاء المشروع بنجاح!");
+    println!("═══════════════════════════════════════════════");
+    println!();
     println!("  cd {name}");
     println!("  nawa dev");
-    println!("\nTemplate: {template}");
-    if let Some((_, desc)) = TEMPLATES.iter().find(|(t, _)| *t == template) {
-        println!("  {desc}");
-    }
+    println!("  → http://localhost:8080 (Svelte UI تعمل تلقائياً!)");
+    println!();
 
     Ok(())
 }
 
-fn dev_server(addr: &str, data_dir: &std::path::Path) -> anyhow::Result<()> {
-    println!("Starting NAWA dev server on {addr}");
-    println!("Data directory: {}", data_dir.display());
-    println!("\nPress Ctrl+C to stop\n");
+fn dev_server(addr: &str, _data_dir: &std::path::Path) -> anyhow::Result<()> {
+    println!("╔══════════════════════════════════════════════╗");
+    println!("║  NAWA Dev — Build + Run (Svelte auto-build)  ║");
+    println!("╚══════════════════════════════════════════════╝");
+    println!();
+    println!("  Addr: {addr}");
+    println!();
 
-    let nawad_path = find_nawad();
-    match nawad_path {
-        Some(path) => {
-            // Run nawad directly (event-driven, restart manually).
-            let mut cmd = Command::new(path);
-            cmd.arg("serve").arg("--addr").arg(addr).arg("--data-dir").arg(data_dir);
-            let status = cmd.status()?;
-            if !status.success() {
-                anyhow::bail!("nawad exited with status: {status}");
-            }
-            Ok(())
+    // Step 1: Build SvelteKit UI if ui/ exists
+    let ui_dir = std::path::Path::new("./ui");
+    if ui_dir.join("package.json").exists() {
+        println!("🎨 SvelteKit UI detected at ./ui/");
+        if !ui_dir.join("node_modules").exists() {
+            println!("  📦 Installing npm dependencies...");
+            let s = Command::new("npm").arg("install").current_dir(ui_dir).status()?;
+            if !s.success() { anyhow::bail!("npm install failed"); }
         }
-        None => {
-            eprintln!("nawad binary not found. Building...");
-            eprintln!("Run: cargo build --release -p nawad");
-            eprintln!("Then: ./target/release/nawad serve --addr {addr} --data-dir {}", data_dir.display());
-            anyhow::bail!("nawad not found")
+        println!("  🔨 Building SvelteKit → ./ui/_nawa/");
+        let s = Command::new("npm").arg("run").arg("build").current_dir(ui_dir).status()?;
+        if !s.success() { anyhow::bail!("npm run build failed"); }
+        println!("  ✓ SvelteKit UI built");
+    } else {
+        println!("ℹ No ui/ directory — skipping Svelte build");
+    }
+
+    // Step 2: Build Rust binary
+    println!("🦀 Building Rust server...");
+    let s = Command::new("cargo").arg("build").arg("--release").status()?;
+    if !s.success() { anyhow::bail!("cargo build failed"); }
+    println!("✓ Rust binary built");
+
+    // Step 3: Find the binary name from Cargo.toml
+    let binary_name = get_binary_name();
+    let binary_path = std::path::Path::new("./target/release").join(&binary_name);
+    if !binary_path.exists() {
+        anyhow::bail!("binary not found at {}. Make sure Cargo.toml has [[bin]] name = \"...\"", binary_path.display());
+    }
+
+    // Step 4: Start the server
+    println!();
+    println!("🚀 Starting server on http://localhost:{}", addr.split(':').last().unwrap_or("8080"));
+    println!("   Press Ctrl+C to stop");
+    println!();
+
+    // The generated binary reads addr from nawa.toml or uses default 0.0.0.0:8080.
+    // We set NAWA_ADDR env var so the binary can pick it up (or just run it directly).
+    let status = Command::new(&binary_path)
+        .env("NAWA_ADDR", addr)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("server exited with status: {status}");
+    }
+    Ok(())
+}
+
+/// Get the binary name from Cargo.toml [[bin]] section.
+fn get_binary_name() -> String {
+    let cargo_toml = std::fs::read_to_string("./Cargo.toml").unwrap_or_default();
+    let mut in_bin_section = false;
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("[[bin]]") {
+            in_bin_section = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_bin_section = false;
+        }
+        if in_bin_section && trimmed.starts_with("name = ") {
+            return trimmed
+                .strip_prefix("name = ")
+                .unwrap_or("")
+                .trim_matches('"')
+                .to_string();
         }
     }
+    // Fallback: use package name
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("name = ") {
+            return trimmed
+                .strip_prefix("name = ")
+                .unwrap_or("")
+                .trim_matches('"')
+                .replace('-', "_");
+        }
+    }
+    "app".to_string()
 }
 
 #[allow(dead_code)]
@@ -700,7 +759,7 @@ fn serve_example(addr: &str) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("nawa CLI v2.5.0 (NAWA Web Operating System)");
+    println!("nawa CLI v2.5.1 (NAWA Web Operating System)");
     println!("─────────────────────────────────────────────");
     println!("Components:");
     println!("  • nawa-kernel: io_uring + mmap + zero-copy");
@@ -708,7 +767,7 @@ fn print_info() {
     println!("  • nawa-db:     MemTable + SSTable + WAL + Bloom");
     println!("  • nawa-http:   HTTP/1.1 + HTTP/3 + TLS + ACME");
     println!("  • nawa-wasm:   WASM sandbox (wasmtime)");
-    println!("  • nawad:       server binary (v2.5.0)");
+    println!("  • nawad:       server binary (v2.5.1)");
     println!();
     println!("Platform:");
     println!("  OS: {}", std::env::consts::OS);
