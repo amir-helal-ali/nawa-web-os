@@ -14,6 +14,7 @@ mod i18n;
 mod logging;
 mod metrics;
 mod middleware;
+mod migrations;
 mod notifications;
 mod openapi;
 mod plugins;
@@ -108,7 +109,7 @@ async fn serve(
     http3_port: Option<u16>,
 ) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
-    tracing::info!("║  NAWA Web Operating System v2.1.0            ║");
+    tracing::info!("║  NAWA Web Operating System v2.2.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
     tracing::info!("Config: {}", cfg.summary());
 
@@ -1176,7 +1177,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
-                    "engine": "AION v2.1.0",
+                    "engine": "AION v2.2.0",
                     "knowledge_graph": {
                         "entities": graph.entity_count(),
                         "relationships": graph.relationship_count(),
@@ -1919,6 +1920,38 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ MIGRATIONS ENDPOINT ═══
+    // GET /api/migrations — migration status and history.
+    {
+        let db = db.clone();
+        router.get("/api/migrations", move |_| {
+            let db = db.clone();
+            async move {
+                let mgr = migrations::MigrationManager::new(db);
+                let history = mgr.history();
+                let stats = mgr.stats();
+                Response::json(&serde_json::json!({
+                    "stats": stats,
+                    "migrations": history,
+                    "count": history.len()
+                }))
+            }
+        });
+    }
+
+    // GET /api/migrations/stats — migration statistics.
+    {
+        let db = db.clone();
+        router.get("/api/migrations/stats", move |_| {
+            let db = db.clone();
+            async move {
+                let mgr = migrations::MigrationManager::new(db);
+                let stats = mgr.stats();
+                Response::json(&serde_json::to_value(&stats).unwrap_or_default())
+            }
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1951,7 +1984,8 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/cookies","GET /api/cors",
                 "GET /api/i18n",
                 "GET /api/logs","GET /api/logs/stats",
-                "GET /api/acl/roles","GET /api/acl/permissions"
+                "GET /api/acl/roles","GET /api/acl/permissions",
+                "GET /api/migrations","GET /api/migrations/stats"
             ]
         }))
     });
@@ -1997,7 +2031,7 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("NAWA Web Operating System v2.1.0");
+    println!("NAWA Web Operating System v2.2.0");
     println!("═══════════════════════════════════════════════");
     println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");
