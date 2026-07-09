@@ -35,7 +35,7 @@
       <a href="#stats">الإحصائيات</a>
       <a href="/docs" target="_blank">API Docs</a>
     </div>
-    <button class="theme-toggle" onclick="window.nawaToggleTheme?.()">🌙</button>
+    <button class="theme-toggle" on:click={() => window.nawaToggleTheme?.()}>🌙</button>
   </nav>
 
   <!-- Hero section -->

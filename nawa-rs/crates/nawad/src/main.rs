@@ -149,8 +149,25 @@ async fn serve(
     let ws_connections = realtime::ConnectionManager::new();
     tracing::info!("✓ Real-time: WebSocket event bus (push, no polling)");
 
-    // SvelteKit integration (optional — loaded if --svelte-dir is provided).
-    let svelte_handler: Option<Arc<nawa_svelte::SvelteHandler>> = if let Some(dir) = svelte_dir.clone() {
+    // SvelteKit integration — auto-detect _nawa/ directory.
+    // Priority: --svelte-dir flag > ./_nawa > ../_nawa > examples/svelte-app/_nawa
+    let svelte_dir_resolved = svelte_dir.clone().or_else(|| {
+        // Auto-detect: check common locations for _nawa/
+        let candidates = [
+            PathBuf::from("./_nawa"),
+            PathBuf::from("./nawa-data/_nawa"),
+            PathBuf::from("./examples/svelte-app/_nawa"),
+        ];
+        for candidate in &candidates {
+            if candidate.join("manifest.json").exists() {
+                tracing::info!("✓ SvelteKit: auto-detected at {}", candidate.display());
+                return Some(candidate.clone());
+            }
+        }
+        None
+    });
+
+    let svelte_handler: Option<Arc<nawa_svelte::SvelteHandler>> = if let Some(dir) = svelte_dir_resolved {
         let manifest_path = dir.join("manifest.json");
         if manifest_path.exists() {
             let addr: SocketAddr = cfg.addr.parse().unwrap_or_else(|_| "127.0.0.1:8080".parse().unwrap());
