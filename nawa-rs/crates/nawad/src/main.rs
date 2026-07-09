@@ -106,7 +106,7 @@ async fn serve(
     http3_port: Option<u16>,
 ) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
-    tracing::info!("║  NAWA Web Operating System v0.1.0            ║");
+    tracing::info!("║  NAWA Web Operating System v2.0.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
     tracing::info!("Config: {}", cfg.summary());
 
@@ -1174,7 +1174,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
-                    "engine": "AION v0.1.0-alpha",
+                    "engine": "AION v2.0.0",
                     "knowledge_graph": {
                         "entities": graph.entity_count(),
                         "relationships": graph.relationship_count(),
@@ -1850,7 +1850,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
-            "name":"NAWA","version":"0.1.0-alpha",
+            "name":"NAWA","version":"2.0.0",
             "description":"Revolutionary Web Operating System — zero polling, real-time push",
             "endpoints": [
                 "GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
@@ -1923,7 +1923,7 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("NAWA Web Operating System v0.1.0-alpha");
+    println!("NAWA Web Operating System v2.0.0");
     println!("═══════════════════════════════════════════════");
     println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");
