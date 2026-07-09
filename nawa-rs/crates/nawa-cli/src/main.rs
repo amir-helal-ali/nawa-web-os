@@ -110,6 +110,16 @@ enum Commands {
 
     /// List available templates.
     Templates,
+
+    /// Update NAWA to the latest version (re-runs the installer).
+    Update,
+
+    /// Uninstall NAWA completely — removes the binary, data dir, and PATH entry.
+    Uninstall {
+        /// Skip the confirmation prompt.
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 const TEMPLATES: &[(&str, &str)] = &[
@@ -159,7 +169,84 @@ fn main() -> anyhow::Result<()> {
             list_templates();
             Ok(())
         }
+        Commands::Update => update_nawa(),
+        Commands::Uninstall { yes } => uninstall_nawa(yes),
     }
+}
+
+/// `nawa update` — re-runs the installer from GitHub.
+fn update_nawa() -> anyhow::Result<()> {
+    println!("🔄 تحديث NAWA من GitHub...");
+    println!("   يتم بناء النسخة الأخيرة من المصدر (5-10 دقائق).");
+    println!();
+    let url = "https://raw.githubusercontent.com/amir-helal-ali/nawa-web-os/main/nawa-rs/scripts/install.sh";
+    let status = Command::new("bash")
+        .arg("-c")
+        .arg(format!("curl -fsSL {} | bash", url))
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("update failed — exit code {:?}", status.code());
+    }
+    Ok(())
+}
+
+/// `nawa uninstall` — removes NAWA completely.
+fn uninstall_nawa(skip_confirm: bool) -> anyhow::Result<()> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+    let nawa_dir = format!("{}/.nawa", home);
+
+    if !PathBuf::from(&nawa_dir).exists() {
+        println!("ℹ️  NAWA غير مثبّت ({}) — لا شيء للحذف.", nawa_dir);
+        return Ok(());
+    }
+
+    if !skip_confirm {
+        println!("⚠️  سيتم حذف NAWA بالكامل من: {}", nawa_dir);
+        println!("   هذا يشمل: binary، البيانات، الـ plugins، القوالب.");
+        print!("هل أنت متأكد؟ [y/N] ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("✓ تم الإلغاء.");
+            return Ok(());
+        }
+    }
+
+    println!("🗑️  إيقاف الخادم إن كان يعمل...");
+    let _ = Command::new("pkill").arg("-f").arg("nawad serve").status();
+    let _ = Command::new("pkill").arg("-f").arg("nawad").status();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    println!("📂 حذف {}...", nawa_dir);
+    let result = std::fs::remove_dir_all(&nawa_dir);
+    match result {
+        Ok(()) => println!("✓ تم حذف المجلد."),
+        Err(e) => {
+            println!("⚠ تعذّر حذف المجلد بالكامل: {}", e);
+            println!("  حاول: rm -rf {}", nawa_dir);
+        }
+    }
+
+    // Remove PATH entry from ~/.bashrc
+    let bashrc = format!("{}/.bashrc", home);
+    if PathBuf::from(&bashrc).exists() {
+        println!("🧹 تنظيف ~/.bashrc...");
+        if let Ok(content) = std::fs::read_to_string(&bashrc) {
+            let filtered: String = content
+                .lines()
+                .filter(|line| !line.contains(".nawa/bin"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let _ = std::fs::write(&bashrc, filtered);
+            println!("✓ تم تنظيف PATH.");
+        }
+    }
+
+    println!();
+    println!("✅ تم حذف NAWA بالكامل.");
+    println!("   نفّذ: source ~/.bashrc");
+    Ok(())
 }
 
 fn create_project(name: &str, template: &str, dir: Option<PathBuf>) -> anyhow::Result<()> {
@@ -613,7 +700,7 @@ fn serve_example(addr: &str) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("nawa CLI v0.1.0-alpha (NAWA Web Operating System)");
+    println!("nawa CLI v2.4.0 (NAWA Web Operating System)");
     println!("─────────────────────────────────────────────");
     println!("Components:");
     println!("  • nawa-kernel: io_uring + mmap + zero-copy");
@@ -621,7 +708,7 @@ fn print_info() {
     println!("  • nawa-db:     MemTable + SSTable + WAL + Bloom");
     println!("  • nawa-http:   HTTP/1.1 + HTTP/3 + TLS + ACME");
     println!("  • nawa-wasm:   WASM sandbox (wasmtime)");
-    println!("  • nawad:       server binary");
+    println!("  • nawad:       server binary (v2.4.0)");
     println!();
     println!("Platform:");
     println!("  OS: {}", std::env::consts::OS);
@@ -635,8 +722,13 @@ fn print_info() {
     println!("License: MIT OR Apache-2.0");
     println!("Repo:    https://github.com/amir-helal-ali/nawa-web-os");
     println!();
-    println!("Run 'nawa templates' to see available project templates.");
-    println!("Run 'nawa create my-app --template blog' to start.");
+    println!("Commands:");
+    println!("  nawa serve           تشغيل الخادم");
+    println!("  nawa new my-app      مشروع جديد");
+    println!("  nawa update          تحديث NAWA");
+    println!("  nawa uninstall       حذف NAWA بالكامل");
+    println!("  nawa info            هذه المعلومات");
+    println!("  nawa templates       قائمة القوالب");
 }
 
 fn list_templates() {

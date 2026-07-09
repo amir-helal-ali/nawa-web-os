@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
 
   let stats = {
-    endpoints: 77,
-    modules: 21,
-    tests: 450,
-    binary: '10MB',
+    endpoints: 87,
+    modules: 26,
+    tests: 530,
+    binary: '10.5MB',
     wasm: '74KB',
     wasmPlugins: 1,
     wsConnections: 0,

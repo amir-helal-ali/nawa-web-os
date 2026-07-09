@@ -5,6 +5,42 @@
 التنسيق مبني على [Keep a Changelog](https://keepachangelog.com/ar/)،
 وهذا المشروع يتبع [Semantic Versioning](https://semver.org/lang/ar/).
 
+## [2.4.0] — 2026-07-09
+
+### 🎯 SvelteKit كواجهة وحيدة + أوامر موحّدة
+
+**أكبر تحديث للواجهة منذ الإطلاق — واجهة SvelteKit اصبحت الواجهة الوحيدة على `/`.**
+
+### ✨ مضاف
+
+#### الواجهة الموحّدة
+- **SvelteKit هو الواجهة الوحيدة** على `/` (تم استبدال dashboard القديم)
+- واجهة عصرية احترافية بـ Glassmorphism + Gradient + Animations
+- تكامل كامل مع كل ميزات NAWA: Quantum، AION، Stats، Admin، Realtime
+- لوحة تحكم Admin مدمجة في الواجهة (Roles, Users, Metrics, Audit)
+- عربي/إنجليزي RTL أصلي
+- 3 ثيمات (Dark/Light/Auto)
+
+#### أوامر موحّدة
+- **`curl ... | bash`** — تثبيت وتحديث بأمر واحد
+- **`nawa uninstall`** — حذف كامل بأمر واحد
+- **`nawa update`** — تحديث بأمر واحد
+- نفس الأمر للتثبيت والتحديث (كشف تلقائي)
+
+### 🔄 مُغيّر
+- استبدال dashboard القديم المدمج بـ SvelteKit
+- SvelteKit يُبنى تلقائياً مع كل تثبيت
+- تحديث جميع الإحصائيات لتعكس الحالة الحالية
+
+### 📊 الإحصائيات
+- **87 HTTP endpoint**
+- **26 module**
+- **530+ اختبار**
+- **0 تحذيرات** (build + clippy)
+- **Binary**: ~10.5 ميجابايت
+
+---
+
 ## [1.0.0] — 2026-07-09
 
 ### 🎉 أول إصدار مستقر

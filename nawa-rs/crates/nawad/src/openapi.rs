@@ -120,7 +120,7 @@ pub fn build_spec(endpoints: &[&str]) -> OpenApiSpec {
         info: OpenApiInfo {
             title: "NAWA Web Operating System".into(),
             description: "Revolutionary Web Operating System — zero polling, real-time push, quantum-inspired computing".into(),
-            version: "2.2.0".into(),
+            version: "2.4.0".into(),
             license: Some(OpenApiLicense {
                 name: "MIT OR Apache-2.0".into(),
                 url: "https://github.com/amir-helal-ali/nawa-web-os".into(),

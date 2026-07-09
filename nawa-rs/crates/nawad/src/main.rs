@@ -110,7 +110,7 @@ async fn serve(
     http3_port: Option<u16>,
 ) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
-    tracing::info!("║  NAWA Web Operating System v2.3.0            ║");
+    tracing::info!("║  NAWA Web Operating System v2.4.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
     tracing::info!("Config: {}", cfg.summary());
 
@@ -215,7 +215,7 @@ async fn serve(
     tracing::info!("   System:     http://localhost:{}/system", addr.port());
     tracing::info!("   Metrics:    http://localhost:{}/metrics", addr.port());
     if svelte_handler.is_some() {
-        tracing::info!("   SvelteKit:  http://localhost:{}/svelte/", addr.port());
+        tracing::info!("   SvelteKit:  http://localhost:{}  (primary UI on /)", addr.port());
     }
     tracing::info!("");
 
@@ -1007,9 +1007,38 @@ fn build_router(deps: RouterDeps) -> Router {
     }
 
     // ═══ SVELTEKIT INTEGRATION ═══
-    // Mounts a SvelteKit app under /svelte/* — no Node.js required at runtime.
-    // The app was pre-compiled by adapter-nawa into _nawa/{manifest.json,pages/,assets/}.
+    // SvelteKit is the primary UI on `/` (mounted above), with `/svelte/**` kept
+    // as a legacy/discovery fallback. The SvelteKit handler emits HTML that
+    // references assets at `/_nawa/assets/...`, so we also mount a catch-all
+    // `/_nawa/**` route that serves those static files directly from the handler.
     if let Some(handler) = svelte_handler {
+        // Asset route: /_nawa/assets/<path> → serve static asset from the handler.
+        // This is what the SPA shell HTML references (e.g. /_nawa/assets/app.js).
+        {
+            let h = handler.clone();
+            router.get("/_nawa/**", move |req| {
+                let h = h.clone();
+                async move {
+                    let rest = req.param("_rest").unwrap_or("").to_string();
+                    if rest.is_empty() {
+                        return Response::not_found("asset not found");
+                    }
+                    // serve_asset expects a path relative to `assets/` (e.g. "app.js").
+                    // The catch-all captures `assets/app.js`, so strip the `assets/` prefix.
+                    let asset_path = rest.strip_prefix("assets/").unwrap_or(&rest);
+                    match h.serve_asset(asset_path) {
+                        Some((bytes, content_type)) => {
+                            let mut r = Response::ok(bytes);
+                            r.header("Content-Type", content_type);
+                            r.header("Cache-Control", "public, max-age=86400");
+                            r
+                        }
+                        None => Response::not_found("asset not found"),
+                    }
+                }
+            });
+        }
+
         // SvelteKit root: /svelte (matches both /svelte and /svelte/ after slash normalization).
         {
             let h = handler.clone();
@@ -1232,7 +1261,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
-                    "engine": "AION v2.3.0",
+                    "engine": "AION v2.4.0",
                     "knowledge_graph": {
                         "entities": graph.entity_count(),
                         "relationships": graph.relationship_count(),
@@ -1338,7 +1367,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "status": if overall { "healthy" } else { "unhealthy" },
                 "overall": overall,
                 "checks": vec![db_check],
-                "version": "2.2.0",
+                "version": "2.4.0",
                 "timestamp": chrono::Utc::now().to_rfc3339()
             });
             let mut r = Response::text(body.to_string());
@@ -1352,7 +1381,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     {
         router.get("/api/stability", move |_| async move {
             Response::json(&serde_json::json!({
-                "version": "2.2.0",
+                "version": "2.4.0",
                 "features": {
                     "connection_pooling": true,
                     "health_checks": true,
@@ -2070,7 +2099,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
-            "name":"NAWA","version":"2.2.0",
+            "name":"NAWA","version":"2.4.0",
             "description":"Revolutionary Web Operating System — zero polling, real-time push",
             "endpoints": [
                 "GET /","GET /register","POST /register","GET /login","POST /login","GET /logout",
@@ -2147,7 +2176,7 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("NAWA Web Operating System v2.3.0");
+    println!("NAWA Web Operating System v2.4.0");
     println!("═══════════════════════════════════════════════");
     println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");

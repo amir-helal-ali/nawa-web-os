@@ -62,43 +62,52 @@
 
 ## 🚀 Quick Start
 
-### Install
+### Install / Update — أمر واحد
 
 ```bash
-# Download pre-built binary (Linux x86_64)
-curl -L https://github.com/amir-helal-ali/nawa-web-os/releases/download/v0.1.0-alpha/nawa-v0.1.0-alpha-linux-amd64.tar.gz | tar xz
-sudo mv nawad nawa /usr/local/bin/
+# تثبيت أو تحديث — نفس الأمر (يكشف تلقائياً)
+curl -fsSL https://raw.githubusercontent.com/amir-helal-ali/nawa-web-os/main/nawa-rs/scripts/install.sh | bash
+```
 
-# Or build from source
+The installer:
+- Builds `nawad` + `nawa` from source (Rust, ~5-10 min)
+- Builds the SvelteKit UI → `_nawa/` (no Node.js needed at runtime)
+- Builds the WASM SSR module
+- Installs everything under `~/.nawa/`
+- Adds `~/.nawa/bin` to your `PATH`
+
+Then:
+
+```bash
+source ~/.bashrc
+
+# Start the server (SvelteKit UI on http://localhost:8080)
+nawa serve
+
+# Or create a new project from a template
+nawa new my-app
+cd my-app && nawad serve
+```
+
+### Update / Uninstall — أمر واحد
+
+```bash
+nawa update          # تحديث بأمر واحد
+nawa uninstall       # حذف كامل بأمر واحد
+```
+
+### Build from source (manual)
+
+```bash
 git clone https://github.com/amir-helal-ali/nawa-web-os.git
 cd nawa-web-os/nawa-rs
 cargo build --release
-```
 
-### Create + Run
+# Build the SvelteKit UI
+cd examples/svelte-app && npm install && npm run build && cd ../..
 
-```bash
-# Create a new project
-nawa create my-app --template saas
-cd my-app
-
-# Start dev server with hot reload
-nawa dev
-
-# In another terminal:
-curl http://localhost:8080/health
-curl -X POST http://localhost:8080/user:1 -d '{"name":"Ahmed"}'
-curl http://localhost:8080/user:1
-```
-
-### Deploy
-
-```bash
-# Deploy to any VPS via SSH
-nawa deploy --target user@your-vps
-
-# Or use Docker
-docker compose up -d
+# Run
+./target/release/nawad serve --svelte-dir examples/svelte-app/_nawa
 ```
 
 ---
