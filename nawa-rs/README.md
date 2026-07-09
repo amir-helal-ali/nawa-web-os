@@ -5,11 +5,59 @@
 [![License: MIT + Apache 2.0](https://img.shields.io/badge/license-MIT%20%2B%20Apache%202.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org/)
 [![CI](https://github.com/amir-helal-ali/nawa-web-os/actions/workflows/rust.yml/badge.svg)](https://github.com/amir-helal-ali/nawa-web-os/actions)
-[![Status](https://img.shields.io/badge/status-alpha%20v0.1.0-yellow.svg)](#)
+[![Release](https://img.shields.io/github/v/release/amir-helal-ali/nawa-web-os)](https://github.com/amir-helal-ali/nawa-web-os/releases)
+[![Status](https://img.shields.io/badge/status-v2.4.0-brightgreen.svg)](#)
 
 <p align="center">
-  <strong>نواة واحدة · صفر نسخ · لا تبعيات خارجية</strong>
+  <strong>نواة واحدة · صفر نسخ · لا تبعيات خارجية · 87 endpoint · 26 module</strong>
 </p>
+
+---
+
+## 🚀 البدء السريع — أمر واحد
+
+```bash
+# تثبيت أو تحديث — نفس الأمر يكشف تلقائياً
+curl -fsSL https://raw.githubusercontent.com/amir-helal-ali/nawa-web-os/main/nawa-rs/scripts/install.sh | bash
+
+# بعد التثبيت
+source ~/.bashrc
+nawa serve          # ابدأ الخادم — http://localhost:8080
+nawa info           # معلومات النظام
+nawa update         # تحديث لاحقاً
+nawa uninstall      # حذف كامل
+```
+
+الـ installer يبني من المصدر (Rust + SvelteKit + WASM module) ويضع كل شيء في `~/.nawa/`.
+
+### بناء من المصدر (يدوي)
+
+```bash
+git clone https://github.com/amir-helal-ali/nawa-web-os.git
+cd nawa-web-os/nawa-rs
+
+# 1. Rust binary
+cargo build --release
+
+# 2. SvelteKit UI (يحتاج npm)
+cd examples/svelte-app && npm install && npm run build && cd ../..
+
+# 3. التشغيل
+./target/release/nawad serve --addr 0.0.0.0:8080 --svelte-dir examples/svelte-app/_nawa
+
+# 4. Benchmark
+./target/release/nawad benchmark --ops 100000
+```
+
+### Docker
+
+```bash
+# بناء ورفع
+docker compose up -d
+
+# اختبار
+curl http://localhost:8080/health
+```
 
 ---
 
@@ -23,37 +71,19 @@ nawa-rs/
 │   ├── nawa-db/            # MemTable + SSTable + WAL + Bloom filter + SkipList + Compaction
 │   ├── nawa-http/          # HTTP/1.1 server + HTTP/3 + TLS + ACME + router
 │   ├── nawa-wasm/          # WASM sandbox (wasmtime) for user plugins
-│   └── nawad/              # binary (CLI + server + handlers)
+│   ├── nawa-aion/          # AION SEO engine — Knowledge Graph + Photon Protocol
+│   ├── nawa-svelte/        # SvelteKit integration (no Node.js at runtime)
+│   ├── nawa-engine/        # Unified SSR (zero-copy + design system)
+│   ├── nawa-auth/          # JWT + RBAC + password hashing
+│   ├── nawa-uring/         # Real io_uring bindings (Linux 5.1+)
+│   ├── nawa-frontend/      # SSR + islands + streaming
+│   ├── nawa-cli/           # `nawa` CLI (create/dev/build/deploy/update/uninstall)
+│   └── nawad/              # server binary (87 endpoints, 26 modules)
+├── examples/svelte-app/    # SvelteKit UI → _nawa/ (compiled)
+├── examples/wasm-ssr-module/ # WASM SSR demo (74KB)
 ├── Dockerfile              # multi-stage build
 ├── docker-compose.yml      # single-command deploy
 └── LICENSE-MIT, LICENSE-APACHE
-```
-
----
-
-## 🚀 البدء السريع
-
-### بناء من المصدر
-
-```bash
-# بناء
-cargo build --release
-
-# تشغيل benchmark
-./target/release/nawad benchmark --ops 100000
-
-# تشغيل HTTP server
-./target/release/nawad serve --addr 0.0.0.0:8080 --data-dir ./nawa-data
-```
-
-### Docker
-
-```bash
-# بناء ورفع
-docker compose up -d
-
-# اختبار
-curl http://localhost:8080/health
 ```
 
 ---

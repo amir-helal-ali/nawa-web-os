@@ -64,17 +64,20 @@ nawad serve
 | `nawa info` | معلومات النظام |
 | `nawa benchmark` | قياس الأداء |
 | `nawa build-wasm <path>` | بناء WASM module |
-| `nawa update` | تحديث NAWA |
+| `nawa update` | تحديث NAWA (يعيد تشغيل الـ installer) |
+| `nawa uninstall` | حذف NAWA بالكامل (مع تأكيد) |
+| `nawa uninstall --yes` | حذف بدون تأكيد |
 | `nawa help` | المساعدة الكاملة |
 
 ---
 
 ## 🌐 الميزات المتاحة بعد التشغيل
 
-### 1. Dashboard & Auth
-- http://localhost:8080 — Dashboard
+### 1. الواجهة الموحّدة (SvelteKit) & Auth
+- http://localhost:8080 — **الواجهة الرئيسية** (4 views: الرئيسية، AION، الإدارة، API)
 - http://localhost:8080/register — تسجيل أول مستخدم (يصبح admin)
 - http://localhost:8080/login — تسجيل الدخول
+- http://localhost:8080/profile — الملف الشخصي
 - http://localhost:8080/settings — إعدادات النظام (admin)
 
 ### 2. قاعدة البيانات (NAWA-DB)
@@ -110,11 +113,23 @@ curl -X POST http://localhost:8080/api/wasm-ssr \
   -d '{"title":"My Page","description":"Hello"}'
 ```
 
-### 6. SvelteKit Integration
+### 6. SvelteKit Integration (الواجهة الموحّدة)
 ```bash
+nawa serve
+# SvelteKit يُحمّل تلقائياً على http://localhost:8080/
+
+# أو يدوياً مع تحديد المسار:
 nawad serve --svelte-dir ./_nawa
-# ثم افتح: http://localhost:8080/svelte/
+
+# الـ installer يبني SvelteKit تلقائياً ويضعه في ~/.nawa/
+# لا حاجة لـ Node.js عند runtime — كل شيء pre-compiled
 ```
+
+الواجهة فيها 4 أقسام:
+- **الرئيسية**: hero + 9 ميزات + Quantum visualization + live stats
+- **AION**: Knowledge Graph stats, Photon Protocol, Sitemap
+- **الإدارة**: مستخدمون، مراقبة Prometheus، سجل تدقيق (يتطلب admin)
+- **API**: مرجع كامل لكل الـ 87 endpoint موزّعة على 9 فئات
 
 ---
 
