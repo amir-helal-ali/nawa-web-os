@@ -4,6 +4,7 @@
 //! لا polling — كل شيء event-driven (WebSocket push).
 
 mod acl;
+mod admin;
 mod cache;
 mod config;
 mod cookies;
@@ -109,7 +110,7 @@ async fn serve(
     http3_port: Option<u16>,
 ) -> anyhow::Result<()> {
     tracing::info!("╔══════════════════════════════════════════════╗");
-    tracing::info!("║  NAWA Web Operating System v2.2.0            ║");
+    tracing::info!("║  NAWA Web Operating System v2.3.0            ║");
     tracing::info!("╚══════════════════════════════════════════════╝");
     tracing::info!("Config: {}", cfg.summary());
 
@@ -1177,7 +1178,7 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 let report = healing.run_once(&db);
                 Response::json(&serde_json::json!({
                     "status": "active",
-                    "engine": "AION v2.2.0",
+                    "engine": "AION v2.3.0",
                     "knowledge_graph": {
                         "entities": graph.entity_count(),
                         "relationships": graph.relationship_count(),
@@ -1952,6 +1953,66 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ ADMIN CONTROL PANEL ═══
+    // GET /api/admin/dashboard — comprehensive admin overview.
+    {
+        let db = db.clone();
+        let auth = auth.clone();
+        router.get("/api/admin/dashboard", move |req| {
+            let db = db.clone();
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                let dashboard = admin::dashboard_json(&db);
+                Response::json(&dashboard)
+            }
+        });
+    }
+
+    // GET /api/admin/actions — list available admin actions.
+    {
+        let auth = auth.clone();
+        router.get("/api/admin/actions", move |req| {
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                Response::json(&serde_json::json!({
+                    "actions": admin::available_actions()
+                }))
+            }
+        });
+    }
+
+    // POST /api/admin/execute — execute an admin action.
+    {
+        let db = db.clone();
+        let auth = auth.clone();
+        router.post("/api/admin/execute", move |req| {
+            let db = db.clone();
+            let auth = auth.clone();
+            async move {
+                let user = get_current_user(&req, &auth);
+                let is_admin = user.as_ref().map(|u| u.role == "admin").unwrap_or(false);
+                if !is_admin {
+                    return errors::handle_error(errors::AppError::forbidden("admin required"));
+                }
+                let body = req.body_str().to_string();
+                let action: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+                let action_name = action["action"].as_str().unwrap_or("");
+                let result = admin::execute_action(&db, action_name);
+                Response::json(&serde_json::to_value(&result).unwrap_or_default())
+            }
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1985,7 +2046,8 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/i18n",
                 "GET /api/logs","GET /api/logs/stats",
                 "GET /api/acl/roles","GET /api/acl/permissions",
-                "GET /api/migrations","GET /api/migrations/stats"
+                "GET /api/migrations","GET /api/migrations/stats",
+                "GET /api/admin/dashboard","GET /api/admin/actions","POST /api/admin/execute"
             ]
         }))
     });
@@ -2031,7 +2093,7 @@ fn benchmark(ops: u32) -> anyhow::Result<()> {
 }
 
 fn print_info() {
-    println!("NAWA Web Operating System v2.2.0");
+    println!("NAWA Web Operating System v2.3.0");
     println!("═══════════════════════════════════════════════");
     println!("Built-in (zero external deps, zero polling):");
     println!("  • nawa-db:      KV/Document DB (LSM+WAL+Bloom)");
