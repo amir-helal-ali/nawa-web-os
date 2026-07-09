@@ -1,80 +1,114 @@
-<section>
-  <h2>NAWA Bootstrap State</h2>
-  <p>App name: <code>{nawa.appName}</code></p>
-  <p>WebSocket URL: <code>{nawa.wsUrl}</code></p>
-  <p>Auth token present: <code>{nawa.authToken ? 'yes' : 'no'}</code></p>
-  <p>Polling: <code>{nawa.polling ? 'yes (BAD)' : 'no (good — pure push)'}</code></p>
-  <p>DB keys in initial state: <code>{nawa.initialState?.db_keys?.length ?? 0}</code></p>
+<section class="nawa-state">
+  <h3>🌐 حالة NAWA</h3>
+  <div class="state-grid">
+    <div class="state-item">
+      <span class="state-label">اسم التطبيق</span>
+      <span class="state-value">{nawa.appName || 'غير معروف'}</span>
+    </div>
+    <div class="state-item">
+      <span class="state-label">WebSocket</span>
+      <span class="state-value ws-status {wsConnected ? 'connected' : 'disconnected'}">
+        {wsConnected ? '🟢 متصل' : '🔴 غير متصل'}
+      </span>
+    </div>
+    <div class="state-item">
+      <span class="state-label">Auth Token</span>
+      <span class="state-value">{nawa.authToken ? '✓ موجود' : '✗ غير موجود'}</span>
+    </div>
+    <div class="state-item">
+      <span class="state-label">Polling</span>
+      <span class="state-value danger">{nawa.polling ? '⚠ مفعّل' : '✓ معطّل (push فقط)'}</span>
+    </div>
+  </div>
 
-  <h3>Live Notifications</h3>
-  <ul>
-    {#each notifications as notif, i}
-      <li><strong>{notif.event}</strong>: {JSON.stringify(notif.data)}</li>
-    {/each}
-  </ul>
+  {#if notifications.length > 0}
+    <div class="notifications">
+      <h4>📢 إشعارات لحظية</h4>
+      {#each notifications as notif}
+        <div class="notif-item">
+          <span class="notif-event">{notif.event}</span>
+          <span class="notif-data">{JSON.stringify(notif.data)}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </section>
 
 <script>
-  // Read the NAWA bootstrap object injected by nawad.
-  let nawa = window.__NAWA__ ?? {
-    appName: 'unknown',
-    wsUrl: '',
-    authToken: null,
-    polling: true,
-    initialState: {}
-  };
+  import { onMount } from 'svelte';
 
+  let nawa = window.__NAWA__ || {};
+  let wsConnected = false;
   let notifications = [];
 
-  // Listen for live notifications via WebSocket (no polling!).
-  if (nawa.wsUrl) {
-    const ws = new WebSocket(nawa.wsUrl);
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        notifications = [data, ...notifications].slice(0, 10);
-      } catch (e) {}
-    };
-  }
+  onMount(() => {
+    if (nawa.wsUrl) {
+      const ws = new WebSocket(nawa.wsUrl);
+      ws.onopen = () => { wsConnected = true; };
+      ws.onclose = () => { wsConnected = false; };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          notifications = [data, ...notifications].slice(0, 5);
+        } catch (e) {}
+      };
+    }
 
-  // Also listen for the custom event the bootstrap script dispatches.
-  window.addEventListener('nawa:notification', (e) => {
-    notifications = [e.detail, ...notifications].slice(0, 10);
+    window.addEventListener('nawa:notification', (e) => {
+      notifications = [e.detail, ...notifications].slice(0, 5);
+    });
   });
 </script>
 
 <style>
-  section {
+  .nawa-state {
     margin-top: 2rem;
     padding: 1.5rem;
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
-    border-radius: 12px;
+    background: rgba(20, 20, 30, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+    border-radius: 16px;
   }
-  h2, h3 {
+  .nawa-state h3 {
     color: #f59e0b;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
   }
-  p {
-    color: #888;
-    line-height: 1.8;
+  .state-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
   }
-  code {
-    background: #0d0c0a;
-    padding: 0.2rem 0.4rem;
-    border-radius: 4px;
-    color: #10b981;
-    font-family: monospace;
+  .state-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
   }
-  ul {
-    list-style: none;
-    padding: 0;
-  }
-  li {
-    padding: 0.5rem;
-    background: #0d0c0a;
+  .state-label { color: #8b8b9a; font-size: 0.8rem; }
+  .state-value { color: #e8e8ef; font-family: monospace; font-size: 0.85rem; }
+  .state-value.connected { color: #10b981; }
+  .state-value.disconnected { color: #ef4444; }
+  .state-value.danger { color: #ef4444; }
+
+  .notifications { margin-top: 1.5rem; }
+  .notifications h4 { color: #f59e0b; margin-bottom: 0.5rem; font-size: 0.95rem; }
+  .notif-item {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.03);
     border-radius: 6px;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
     font-size: 0.85rem;
+    animation: slide-in 0.3s ease;
   }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .notif-event { color: #f59e0b; font-weight: 600; min-width: 120px; }
+  .notif-data { color: #8b8b9a; flex: 1; word-break: break-all; }
 </style>
