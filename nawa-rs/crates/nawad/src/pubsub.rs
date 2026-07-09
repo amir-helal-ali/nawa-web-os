@@ -91,6 +91,13 @@ impl PubSubManager {
             if let Some(sub_set) = subs.get_mut(connection_id) {
                 sub_set.remove(channel);
             }
+            // Drop the channel entirely when it has no subscribers left,
+            // so `channels()` only returns channels with active subscribers.
+            if let Some(channel_set) = channels.get(channel) {
+                if channel_set.is_empty() {
+                    channels.remove(channel);
+                }
+            }
         }
         removed
     }

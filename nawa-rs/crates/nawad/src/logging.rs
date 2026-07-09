@@ -142,7 +142,13 @@ impl LogEntry {
         if let Some(uid) = &self.user_id {
             s.push_str(&format!(" | user={uid}"));
         }
-        if let Some(p) = &self.path {
+        if let Some(m) = &self.method {
+            if let Some(p) = &self.path {
+                s.push_str(&format!(" | {m} {p}"));
+            } else {
+                s.push_str(&format!(" | {m}"));
+            }
+        } else if let Some(p) = &self.path {
             s.push_str(&format!(" | {p}"));
         }
         if let Some(d) = self.duration_ms {
@@ -277,8 +283,8 @@ mod tests {
         buf.push(LogEntry::new(LogLevel::Info, "info", "t")).await;
         buf.push(LogEntry::new(LogLevel::Warn, "warn", "t")).await;
         let recent = buf.recent(10, Some(LogLevel::Warn)).await;
-        assert_eq!(recent.len(), 2); // warn + error (but no error here)
-        // Actually only warn since we didn't push error
+        // Filter returns entries with level >= Warn, which is just the single Warn entry.
+        assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].level, LogLevel::Warn);
     }
 

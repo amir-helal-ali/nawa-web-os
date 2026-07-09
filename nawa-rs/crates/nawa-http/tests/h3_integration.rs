@@ -4,7 +4,9 @@
 //! Full end-to-end tests require a TLS certificate and UDP socket
 //! binding, which is complex in CI. We test the public API surface.
 
-use nawa_http::{Http3Config, Http3Error, Http3Server, Router};
+#![cfg(feature = "http3")]
+
+use nawa_http::{Http3Error, Router};
 
 #[test]
 fn http3_error_variants() {
@@ -14,7 +16,7 @@ fn http3_error_variants() {
     let h3_err = Http3Error::H3("parse error".into());
     assert!(format!("{h3_err}").contains("H3"));
 
-    let io_err = Http3Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "test"));
+    let io_err = Http3Error::Io(std::io::Error::other("test"));
     assert!(format!("{io_err}").contains("io error"));
 }
 

@@ -733,7 +733,7 @@ mod tests {
         let probs: Vec<f64> = interfered.probabilities().into_iter().map(|(_, p)| p).collect();
         // After destructive interference of identical states, probabilities should be ~0.
         for p in probs {
-            assert!(p < 0.01 || p > 0.99); // Either near 0 or near 1 (normalized).
+            assert!(!(0.01..=0.99).contains(&p)); // Either near 0 or near 1 (normalized).
         }
     }
 
@@ -796,9 +796,13 @@ mod tests {
 
     #[test]
     fn quantum_tunneler_cools_down() {
-        let mut t = QuantumTunneler::new(100.0, 100.0, 0.1);
+        // Use a very low temperature so tunneling probability is essentially 0,
+        // forcing the cool-down branch on every rejected move.
+        let mut t = QuantumTunneler::new(100.0, 0.001, 0.1);
         let initial_temp = t.temperature();
         for _ in 0..100 {
+            // Always propose a worse state so the move is rejected and the
+            // tunneler cools down.
             t.try_move(105.0);
         }
         assert!(t.temperature() < initial_temp);
@@ -869,7 +873,7 @@ mod tests {
     fn quantum_random_in_range() {
         for _ in 0..1000 {
             let r = quantum_random();
-            assert!(r >= 0.0 && r < 1.0);
+            assert!((0.0..1.0).contains(&r));
         }
     }
 
@@ -884,9 +888,8 @@ mod tests {
     #[test]
     fn quantum_coin_flip() {
         let mut heads = 0;
-        let mut tails = 0;
         for _ in 0..10000 {
-            if QuantumMeasurement::coin_flip() { heads += 1; } else { tails += 1; }
+            if QuantumMeasurement::coin_flip() { heads += 1; }
         }
         // Should be roughly 50/50 (within 10%).
         assert!((heads as f64 / 10000.0 - 0.5).abs() < 0.1);

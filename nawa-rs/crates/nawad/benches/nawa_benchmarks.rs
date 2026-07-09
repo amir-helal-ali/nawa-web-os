@@ -179,7 +179,7 @@ fn bench_auth() {
     let start = Instant::now();
     for _ in 0..n {
         let claims = auth.verify_token(black_box(&token));
-        black_box(claims);
+        let _ = black_box(claims);
     }
     let elapsed = start.elapsed();
     println!("  JWT verification: {:>5} calls in {:>8.2?} → {:>8.0} calls/sec",
@@ -218,7 +218,7 @@ fn bench_svelte() {
 
 fn bench_http_router() {
     println!("═══ NAWA-HTTP Router ═══");
-    use nawa_http::{Router, StatusCode};
+    use nawa_http::Router;
 
     let mut router = Router::new();
     router.get("/", |_| async { nawa_http::Response::text("home") });

@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn schedule_once_creates_task() {
         let sched = Scheduler::new();
-        let id = sched.schedule_once("test", Duration::from_secs(60)).await;
+        let _id = sched.schedule_once("test", Duration::from_secs(60)).await;
         let tasks = sched.list().await;
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].name, "test");
@@ -273,7 +273,7 @@ mod tests {
     #[tokio::test]
     async fn schedule_interval_creates_recurring() {
         let sched = Scheduler::new();
-        let id = sched.schedule_interval("cleanup", Duration::from_secs(300)).await;
+        let _id = sched.schedule_interval("cleanup", Duration::from_secs(300)).await;
         let tasks = sched.list().await;
         assert!(tasks[0].kind.is_recurring());
     }
@@ -303,7 +303,7 @@ mod tests {
         // The "past" task should be due (next_run <= now).
         // Note: with 0 delay, next_run = now, so it might be exactly now.
         let due = sched.due_tasks().await;
-        assert!(due.len() >= 1);
+        assert!(!due.is_empty());
     }
 
     #[tokio::test]

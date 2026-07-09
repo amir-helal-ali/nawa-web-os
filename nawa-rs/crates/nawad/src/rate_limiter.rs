@@ -220,6 +220,6 @@ mod tests {
         let limiter = SlidingWindowRateLimiter::new(1, Duration::from_secs(10));
         limiter.check("c1").await.unwrap();
         let retry = limiter.check("c1").await.unwrap_err();
-        assert!(retry >= 1 && retry <= 10);
+        assert!((1..=10).contains(&retry));
     }
 }

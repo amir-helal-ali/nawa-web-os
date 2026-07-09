@@ -102,16 +102,25 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release binary
+      - name: Build release binaries
         working-directory: nawa-rs
-        run: cargo build --release --bin nawad
+        run: cargo build --release --bin nawad --bin nawa
 
-      - name: Strip binary
-        run: strip nawa-rs/target/release/nawad
+      - name: Strip binaries
+        run: |
+          strip nawa-rs/target/release/nawad
+          strip nawa-rs/target/release/nawa
 
-      - name: Upload artifact
+      - name: Upload nawad artifact
         uses: actions/upload-artifact@v4
         with:
           name: nawad-linux-amd64
           path: nawa-rs/target/release/nawad
+          retention-days: 30
+
+      - name: Upload nawa CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nawa-cli-linux-amd64
+          path: nawa-rs/target/release/nawa
           retention-days: 30

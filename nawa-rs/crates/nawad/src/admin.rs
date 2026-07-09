@@ -202,7 +202,9 @@ fn count_admins(db: &nawa_db::DbEngine) -> usize {
             if key.starts_with("user:email:") || key.starts_with("user:count") {
                 return false;
             }
-            v.display().contains("\"role\":\"admin\"")
+            // Match both compact ("role":"admin") and pretty ("role": "admin") JSON forms.
+            let display = v.display();
+            display.contains("\"role\":\"admin\"") || display.contains("\"role\": \"admin\"")
         })
         .count()
 }
@@ -351,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn count_admins() {
+    fn count_admins_with_data() {
         let db = nawa_db::DbEngine::open_in_memory();
         let _ = db.put("user:1", nawa_db::Value::from_json_str(r#"{"username":"admin","role":"admin"}"#).unwrap());
         let _ = db.put("user:2", nawa_db::Value::from_json_str(r#"{"username":"user","role":"user"}"#).unwrap());

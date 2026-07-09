@@ -3,7 +3,7 @@
 //! Run with: `cargo bench -p nawa-db`
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use nawa_db::{BloomFilter, DbEngine, MemTable, SkipList, Value};
+use nawa_db::{BloomFilter, DbEngine, SkipList, Value};
 
 fn bench_put(c: &mut Criterion) {
     let mut group = c.benchmark_group("put");
@@ -117,7 +117,7 @@ fn bench_skip_list(c: &mut Criterion) {
 
     group.bench_function("insert", |b| {
         b.iter_batched(
-            || SkipList::<Vec<u8>, Vec<u8>>::new(),
+            SkipList::<Vec<u8>, Vec<u8>>::new,
             |sl| {
                 for i in 0..100u64 {
                     sl.insert(format!("key:{i:06}").into_bytes(), b"value".to_vec());

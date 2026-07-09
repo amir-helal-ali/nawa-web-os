@@ -277,7 +277,7 @@ mod tests {
         let m = sample_manifest();
         let r = m.match_route("/admin").unwrap();
         assert_eq!(r.route.pattern, "/admin/[[section]]");
-        assert!(r.params.get("section").is_none());
+        assert!(!r.params.contains_key("section"));
     }
 
     #[test]

@@ -329,14 +329,15 @@ mod tests {
     fn security_headers() {
         let mut resp = nawa_http::Response::text("hi");
         add_security_headers(&mut resp);
-        assert_eq!(resp.headers.get("x-content-type-options"), Some(&"nosniff".to_string()));
+        // Headers are stored with the exact case used in SECURITY_HEADERS.
+        assert_eq!(resp.headers.get("X-Content-Type-Options"), Some(&"nosniff".to_string()));
     }
 
     #[test]
     fn cors_headers() {
         let mut resp = nawa_http::Response::text("hi");
         add_cors_headers(&mut resp);
-        assert!(resp.headers.contains_key("access-control-allow-origin"));
+        assert!(resp.headers.contains_key("Access-Control-Allow-Origin"));
     }
 
     #[test]
@@ -362,7 +363,7 @@ mod tests {
         db.put("key2", nawa_db::Value::from_str("val2")).unwrap();
         
         let backup = backup_db(&db);
-        assert!(backup.len() > 0);
+        assert!(!backup.is_empty());
         
         let db2 = nawa_db::DbEngine::open_in_memory();
         let count = restore_db(&db2, &backup).unwrap();

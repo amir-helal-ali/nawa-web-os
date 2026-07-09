@@ -28,8 +28,8 @@ fn json_document_roundtrip() {
 fn delete_returns_existence() {
     let db = DbEngine::open_in_memory();
     db.put("k1", Value::from_str("v1")).unwrap();
-    assert_eq!(db.delete("k1").unwrap(), true);
-    assert_eq!(db.delete("k1").unwrap(), false);
+    assert!(db.delete("k1").unwrap());
+    assert!(!db.delete("k1").unwrap());
 }
 
 #[test]

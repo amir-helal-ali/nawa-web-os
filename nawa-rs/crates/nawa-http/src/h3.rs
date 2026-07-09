@@ -145,9 +145,6 @@ pub enum Http3Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::router::Router;
-    use crate::tls::TlsConfig;
-    use std::net::SocketAddr;
 
     #[test]
     fn http3_error_display() {

@@ -494,7 +494,7 @@ mod tests {
         for et in [EntityType::Person, EntityType::Article, EntityType::Product,
                    EntityType::Event, EntityType::WebPage] {
             let imp = compute_importance(et, &data);
-            assert!(imp >= 0.0 && imp <= 1.0);
+            assert!((0.0..=1.0).contains(&imp));
         }
     }
 
