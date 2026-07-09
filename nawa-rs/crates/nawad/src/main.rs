@@ -9,6 +9,7 @@ mod cookies;
 mod dashboard;
 mod errors;
 mod feature_flags;
+mod i18n;
 mod metrics;
 mod middleware;
 mod notifications;
@@ -1827,6 +1828,25 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
         });
     }
 
+    // ═══ I18N ENDPOINT ═══
+    // GET /api/i18n — internationalization info + translations.
+    {
+        router.get("/api/i18n", move |req| async move {
+            let i18n = i18n::I18n::new();
+            let accept_lang = req.header("accept-language");
+            let cookie_lang = req.header("cookie")
+                .and_then(|c| cookies::Cookie::get(c, "nawa_lang"));
+            let query_lang = req.query("lang");
+            let lang = i18n::I18n::detect(accept_lang, cookie_lang.as_deref(), query_lang);
+            let info = i18n.info(lang);
+            let translations = i18n.all_translations(lang);
+            Response::json(&serde_json::json!({
+                "i18n": info,
+                "translations": translations
+            }))
+        });
+    }
+
     // ═══ API INFO ═══
     router.get("/api", |_| async {
         Response::json(&serde_json::json!({
@@ -1856,7 +1876,8 @@ h1{color:#f59e0b}a{color:#f59e0b}table{border-collapse:collapse;width:100%}td,th
                 "GET /api/features","GET /api/features/stats","GET /api/features/:key",
                 "GET /api/plugins","GET /api/plugins/stats",
                 "GET /api/webhooks","GET /api/webhooks/stats","GET /api/webhooks/deliveries",
-                "GET /api/cookies","GET /api/cors"
+                "GET /api/cookies","GET /api/cors",
+                "GET /api/i18n"
             ]
         }))
     });

@@ -1,10 +1,10 @@
 #!/bin/bash
-# NAWA Web Operating System — Universal Installer v1.9.0
+# NAWA Web Operating System — Universal Installer v2.0.0
 # أمر واحد يثبّت النظام بالكامل بكل مشتملاته
 set -e
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-NAWA_VERSION="1.9.0"
+NAWA_VERSION="2.0.0"
 NAWA_INSTALL_DIR="${NAWA_INSTALL_DIR:-$HOME/.nawa}"
 NAWA_BIN_DIR="$NAWA_INSTALL_DIR/bin"
 NAWA_PLUGINS_DIR="$NAWA_INSTALL_DIR/plugins"
@@ -15,7 +15,7 @@ print_step() { echo -e "${BLUE}[$(date +%H:%M:%S)] $1${NC}"; }
 print_success() { echo -e "${GREEN}[$(date +%H:%M:%S)] ✓ $1${NC}"; }
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  NAWA Web Operating System v1.9.0 — Full Installer          ║${NC}"
+echo -e "${BLUE}║  NAWA Web Operating System v2.0.0 — Full Installer          ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -143,7 +143,7 @@ print_success "nawad: $VERSION"
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║              ✅ تم تثبيت NAWA v1.9.0 بالكامل!                ║${NC}"
+echo -e "${GREEN}║              ✅ تم تثبيت NAWA v2.0.0 بالكامل!                ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${YELLOW}الخطوات التالية:${NC}"
