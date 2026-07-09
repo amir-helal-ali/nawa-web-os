@@ -43,32 +43,44 @@
 
   async function loadAdmin() {
     try {
-      const [usersRes, metricsRes, auditRes] = await Promise.all([
-        fetch('/api/admin/users').then(r => r.json()),
-        fetch('/metrics').then(r => r.json()),
-        fetch('/api/admin/audit?limit=20').then(r => r.json()),
+      // /auth/users and /api/audit require admin; /metrics is Prometheus text.
+      const [usersRes, metricsText, auditRes, dashboardRes] = await Promise.all([
+        fetch('/auth/users').then(r => r.ok ? r.json() : Promise.reject(new Error(r.status))),
+        fetch('/metrics').then(r => r.ok ? r.text() : Promise.reject(new Error(r.status))),
+        fetch('/api/audit?limit=20').then(r => r.ok ? r.json() : Promise.reject(new Error(r.status))),
+        fetch('/api/admin/dashboard').then(r => r.ok ? r.json() : Promise.reject(new Error(r.status))),
       ]);
-      adminData = { users: usersRes.users || [], metrics: metricsRes || {}, audit: auditRes.events || [] };
+      // /metrics is Prometheus text — extract just the metric names for a compact view.
+      const metricNames = (metricsText.match(/^nawa_\w+/gm) || []).slice(0, 24);
+      adminData = {
+        users: Array.isArray(usersRes) ? usersRes : (usersRes.users || []),
+        metrics: { metric_count: metricNames.length, sample_metrics: metricNames, dashboard: dashboardRes },
+        audit: Array.isArray(auditRes) ? auditRes : (auditRes.events || auditRes.audit || []),
+        error: null,
+      };
     } catch (e) {
-      adminData = { users: [], metrics: { error: 'غير مصرح' }, audit: [] };
+      adminData = { users: [], metrics: { error: 'تسجيل دخول admin مطلوب' }, audit: [], error: e.message };
     }
   }
 
   async function loadAion() {
     try {
-      const [photonRes, sitemapRes, kgRes] = await Promise.all([
+      const [statsRes, photonRes, sitemapRes] = await Promise.all([
+        fetch('/aion/stats').then(r => r.json()),
         fetch('/__photon__').then(r => r.json()),
         fetch('/sitemap.xml').then(r => r.text()),
-        fetch('/api/aion/health').then(r => r.json()),
       ]);
       aionData = {
-        entities: kgRes.knowledge_graph?.entities || 0,
-        relationships: kgRes.knowledge_graph?.relationships || 0,
+        entities: statsRes.entities || 0,
+        relationships: statsRes.relationships || 0,
+        features: statsRes.features || {},
+        endpoints: statsRes.endpoints || {},
+        engine: statsRes.engine || 'AION',
         photon: JSON.stringify(photonRes, null, 2).slice(0, 600),
         sitemap: sitemapRes.slice(0, 400),
       };
     } catch (e) {
-      aionData = { entities: 0, relationships: 0, photon: '', sitemap: '' };
+      aionData = { entities: 0, relationships: 0, photon: '', sitemap: '', error: e.message };
     }
   }
 
@@ -253,7 +265,7 @@
   {#if currentView === 'aion'}
     <section class="view-section">
       <h2 class="section-title">🌐 AION SEO Engine</h2>
-      <p class="view-subtitle">Adaptive Intelligent Ontological Network — محرك SEO ثوري</p>
+      <p class="view-subtitle">{aionData.engine || 'AION'} — Adaptive Intelligent Ontological Network</p>
 
       <div class="aion-grid">
         <div class="aion-card">
@@ -262,12 +274,19 @@
             <div class="kg-stat"><span class="kg-num">{aionData.entities}</span><span class="kg-label">Entities</span></div>
             <div class="kg-stat"><span class="kg-num">{aionData.relationships}</span><span class="kg-label">Relationships</span></div>
           </div>
+          {#if aionData.features}
+            <div class="feature-tags">
+              {#each Object.entries(aionData.features) as [k, v]}
+                {#if v}<span class="tag">{k}</span>{/if}
+              {/each}
+            </div>
+          {/if}
           <button class="btn-sm" on:click={loadAion}>↻ تحديث</button>
         </div>
 
         <div class="aion-card">
           <h3>⚡ Photon Protocol</h3>
-          <p class="card-desc">.endpoint واحد يعيد الـ Knowledge Graph كاملاً للـ crawlers</p>
+          <p class="card-desc">endpoint واحد يعيد الـ Knowledge Graph كاملاً للـ crawlers</p>
           <pre class="code-block">{aionData.photon || 'اضغط تحديث...'}</pre>
           <a href="/__photon__" target="_blank" class="btn-sm">فتح /__photon__</a>
         </div>
@@ -286,6 +305,7 @@
             <span class="tag">HTML</span><span class="tag">JSON-LD</span><span class="tag">ActivityPub</span><span class="tag">RSS</span><span class="tag">Atom</span><span class="tag">Photon</span>
           </div>
           <a href="/robots.txt" target="_blank" class="btn-sm">robots.txt</a>
+          <a href="/aion/stats" target="_blank" class="btn-sm">/aion/stats</a>
         </div>
       </div>
     </section>
@@ -333,17 +353,19 @@
           <!-- Metrics panel -->
           <div class="admin-card">
             <div class="admin-header">
-              <h3>📈 المراقبة</h3>
-              <a href="/metrics" target="_blank" class="btn-sm">JSON</a>
+              <h3>📈 المراقبة (Prometheus)</h3>
+              <a href="/metrics" target="_blank" class="btn-sm">Raw</a>
             </div>
             {#if adminData.metrics.error}
               <p class="muted">⚠ {adminData.metrics.error}</p>
             {:else}
+              <p class="muted" style="margin-bottom:0.5rem;font-size:0.8rem">
+                {adminData.metrics.metric_count} مقياس نشط
+              </p>
               <div class="metrics-list">
-                {#each Object.entries(adminData.metrics) as [k, v]}
+                {#each adminData.metrics.sample_metrics || [] as m}
                   <div class="metric-row">
-                    <span class="metric-key">{k}</span>
-                    <span class="metric-val">{typeof v === 'object' ? JSON.stringify(v) : v}</span>
+                    <span class="metric-key">{m}</span>
                   </div>
                 {/each}
               </div>
@@ -376,11 +398,13 @@
         <div class="quick-actions">
           <h3>⚡ إجراءات سريعة</h3>
           <div class="actions-row">
-            <a href="/api/admin/users" target="_blank" class="action-btn">GET /api/admin/users</a>
+            <a href="/auth/users" target="_blank" class="action-btn">GET /auth/users</a>
             <a href="/metrics" target="_blank" class="action-btn">GET /metrics</a>
-            <a href="/api/admin/audit" target="_blank" class="action-btn">GET /api/admin/audit</a>
+            <a href="/api/audit" target="_blank" class="action-btn">GET /api/audit</a>
+            <a href="/api/admin/dashboard" target="_blank" class="action-btn">GET /api/admin/dashboard</a>
             <a href="/api/health" target="_blank" class="action-btn">GET /api/health</a>
             <a href="/__photon__" target="_blank" class="action-btn">GET /__photon__</a>
+            <a href="/aion/stats" target="_blank" class="action-btn">GET /aion/stats</a>
             <a href="/system" target="_blank" class="action-btn">GET /system</a>
           </div>
         </div>
@@ -405,6 +429,13 @@
             <li><span class="m-get">GET</span> /logout</li>
             <li><span class="m-get">GET</span> /profile</li>
             <li><span class="m-post">POST</span> /profile</li>
+            <li><span class="m-post">POST</span> /auth/register</li>
+            <li><span class="m-post">POST</span> /auth/login</li>
+            <li><span class="m-get">GET</span> /auth/me</li>
+            <li><span class="m-get">GET</span> /auth/users</li>
+            <li><span class="m-post">POST</span> /admin/verify</li>
+            <li><span class="m-post">POST</span> /admin/role</li>
+            <li><span class="m-post">POST</span> /admin/delete</li>
           </ul>
         </div>
 
@@ -414,20 +445,18 @@
             <li><span class="m-get">GET</span> /__photon__</li>
             <li><span class="m-get">GET</span> /sitemap.xml</li>
             <li><span class="m-get">GET</span> /robots.txt</li>
-            <li><span class="m-get">GET</span> /api/aion/health</li>
-            <li><span class="m-get">GET</span> /api/aion/kg</li>
-            <li><span class="m-post">POST</span> /api/aion/heal</li>
+            <li><span class="m-get">GET</span> /aion/stats</li>
+            <li><span class="m-post">POST</span> /aion/heal</li>
           </ul>
         </div>
 
         <div class="api-card">
           <h3>⚛️ الكوانتم</h3>
           <ul class="api-list">
-            <li><span class="m-get">GET</span> /api/quantum/state</li>
-            <li><span class="m-post">POST</span> /api/quantum/measure</li>
-            <li><span class="m-post">POST</span> /api/quantum/superpose</li>
-            <li><span class="m-post">POST</span> /api/quantum/entangle</li>
-            <li><span class="m-post">POST</span> /api/quantum/tunnel</li>
+            <li><span class="m-get">GET</span> /api/quantum</li>
+            <li><span class="m-get">GET</span> /api/quantum/superposition</li>
+            <li><span class="m-get">GET</span> /api/quantum/tunneling</li>
+            <li><span class="m-get">GET</span> /api/quantum/gates</li>
             <li><span class="m-get">GET</span> /api/quantum/qec</li>
           </ul>
         </div>
@@ -435,41 +464,47 @@
         <div class="api-card">
           <h3>🗄️ البيانات</h3>
           <ul class="api-list">
-            <li><span class="m-get">GET</span> /api/data/:key</li>
-            <li><span class="m-post">POST</span> /api/data/:key</li>
-            <li><span class="m-del">DEL</span> /api/data/:key</li>
-            <li><span class="m-get">GET</span> /api/data?prefix=</li>
-            <li><span class="m-get">GET</span> /api/data/export</li>
+            <li><span class="m-get">GET</span> /:key</li>
+            <li><span class="m-post">POST</span> /:key</li>
+            <li><span class="m-del">DEL</span> /:key</li>
+            <li><span class="m-get">GET</span> /scan/:prefix</li>
+            <li><span class="m-get">GET</span> /backup</li>
+            <li><span class="m-post">POST</span> /restore</li>
           </ul>
         </div>
 
         <div class="api-card">
-          <h3>🔌 Realtime</h3>
+          <h3>🔌 Realtime & PubSub</h3>
           <ul class="api-list">
             <li><span class="m-ws">WS</span> ws://host:port+1</li>
-            <li><span class="m-post">POST</span> /api/publish</li>
-            <li><span class="m-get">GET</span> /api/channels</li>
-            <li><span class="m-get">GET</span> /api/connections</li>
+            <li><span class="m-get">GET</span> /api/pubsub</li>
+            <li><span class="m-get">GET</span> /api/pubsub/channels</li>
+            <li><span class="m-get">GET</span> /api/notifications</li>
+            <li><span class="m-post">POST</span> /api/notifications/send</li>
+            <li><span class="m-get">GET</span> /api/sessions</li>
           </ul>
         </div>
 
         <div class="api-card">
           <h3>🛡️ الإدارة</h3>
           <ul class="api-list">
-            <li><span class="m-get">GET</span> /api/admin/users</li>
-            <li><span class="m-get">GET</span> /api/admin/audit</li>
-            <li><span class="m-get">GET</span> /metrics</li>
-            <li><span class="m-get">GET</span> /system</li>
-            <li><span class="m-get">GET</span> /api/health</li>
+            <li><span class="m-get">GET</span> /api/admin/dashboard</li>
+            <li><span class="m-get">GET</span> /api/admin/actions</li>
+            <li><span class="m-post">POST</span> /api/admin/execute</li>
+            <li><span class="m-get">GET</span> /api/audit</li>
+            <li><span class="m-get">GET</span> /api/acl/roles</li>
+            <li><span class="m-get">GET</span> /api/acl/permissions</li>
           </ul>
         </div>
 
         <div class="api-card">
-          <h3>📦 WASM SSR</h3>
+          <h3>📦 WASM & Plugins</h3>
           <ul class="api-list">
             <li><span class="m-post">POST</span> /api/wasm-ssr</li>
             <li><span class="m-get">GET</span> /api/plugins</li>
-            <li><span class="m-post">POST</span> /api/plugins/:name/reload</li>
+            <li><span class="m-get">GET</span> /api/plugins/stats</li>
+            <li><span class="m-get">GET</span> /plugins</li>
+            <li><span class="m-get">GET</span> /ssr</li>
           </ul>
         </div>
 
@@ -477,10 +512,30 @@
           <h3>⚙️ النظام</h3>
           <ul class="api-list">
             <li><span class="m-get">GET</span> /</li>
+            <li><span class="m-get">GET</span> /system</li>
+            <li><span class="m-get">GET</span> /health</li>
+            <li><span class="m-get">GET</span> /api/health</li>
+            <li><span class="m-get">GET</span> /metrics</li>
+            <li><span class="m-get">GET</span> /api/version</li>
+            <li><span class="m-get">GET</span> /api/stability</li>
             <li><span class="m-get">GET</span> /docs</li>
             <li><span class="m-get">GET</span> /openapi.json</li>
-            <li><span class="m-get">GET</span> /api/feature-flags</li>
-            <li><span class="m-get">GET</span> /api/scheduler/jobs</li>
+            <li><span class="m-get">GET</span> /uring</li>
+          </ul>
+        </div>
+
+        <div class="api-card">
+          <h3>🛠️ الميزات المتقدمة</h3>
+          <ul class="api-list">
+            <li><span class="m-get">GET</span> /api/features</li>
+            <li><span class="m-get">GET</span> /api/scheduler</li>
+            <li><span class="m-get">GET</span> /api/migrations</li>
+            <li><span class="m-get">GET</span> /api/cache/stats</li>
+            <li><span class="m-get">GET</span> /api/rate-limit/stats</li>
+            <li><span class="m-get">GET</span> /api/traces</li>
+            <li><span class="m-get">GET</span> /api/logs</li>
+            <li><span class="m-get">GET</span> /api/i18n</li>
+            <li><span class="m-get">GET</span> /api/webhooks</li>
           </ul>
         </div>
       </div>
