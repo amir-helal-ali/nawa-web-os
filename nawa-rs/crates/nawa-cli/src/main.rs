@@ -34,6 +34,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Create a new NAWA project from a template.
+    #[command(alias = "new")]
     Create {
         /// Project name (becomes the directory name).
         name: String,
@@ -48,6 +49,7 @@ enum Commands {
     },
 
     /// Start the development server with hot reload.
+    #[command(alias = "start")]
     Dev {
         /// Address to bind on.
         #[arg(long, default_value = "0.0.0.0:8080")]
@@ -820,7 +822,7 @@ fn print_info() {
     println!();
     println!("Commands:");
     println!("  nawa serve           تشغيل الخادم");
-    println!("  nawa new my-app      مشروع جديد");
+    println!("  nawa create my-app      مشروع جديد");
     println!("  nawa update          تحديث NAWA");
     println!("  nawa uninstall       حذف NAWA بالكامل");
     println!("  nawa info            هذه المعلومات");
