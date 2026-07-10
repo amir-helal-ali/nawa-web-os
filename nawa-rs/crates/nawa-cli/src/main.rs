@@ -275,6 +275,17 @@ fn create_project(name: &str, template: &str, dir: Option<PathBuf>) -> anyhow::R
 
     // Cargo.toml — with nawa-svelte dependency
     println!("📦 إنشاء Cargo.toml...");
+    // Detect NAWA source location for path dependencies.
+    // The install.sh clones the repo to ~/.nawa/src/nawa-web-os/nawa-rs
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home".to_string());
+    let nawa_src = format!("{}/.nawa/src/nawa-web-os/nawa-rs", home);
+    let nawa_crates_dir = format!("{}/crates", nawa_src);
+    let crates_path = if std::path::Path::new(&format!("{}/nawa-db", nawa_crates_dir)).exists() {
+        nawa_crates_dir.clone()
+    } else {
+        // Fallback: try relative path (works when inside the nawa-rs workspace)
+        "../../crates".to_string()
+    };
     let cargo_toml = format!(
         r#"[package]
 name = "{name}"
@@ -282,9 +293,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nawa-db = {{ path = "../../crates/nawa-db" }}
-nawa-http = {{ path = "../../crates/nawa-http" }}
-nawa-svelte = {{ path = "../../crates/nawa-svelte" }}
+nawa-db = {{ path = "{crates_path}/nawa-db" }}
+nawa-http = {{ path = "{crates_path}/nawa-http" }}
+nawa-svelte = {{ path = "{crates_path}/nawa-svelte" }}
 tokio = {{ version = "1.42", features = ["full"] }}
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
@@ -293,10 +304,36 @@ anyhow = "1.0"
 [[bin]]
 name = "{name}"
 path = "src/main.rs"
+
+# This makes the project its own workspace root so cargo doesn't
+# try to inherit from the nawa-rs workspace (which would fail because
+# the nawa crates use version.workspace = true).
+[workspace]
 "#
     );
     std::fs::write(project_dir.join("Cargo.toml"), cargo_toml)?;
-    println!("  ✓ Cargo.toml");
+    println!("  ✓ Cargo.toml (crates path: {crates_path})");
+
+    // Also copy the workspace root Cargo.toml and Cargo.lock to the NAWA source dir
+    // if they don't exist (needed for the nawa crates' workspace = true inheritance).
+    let nawa_workspace_toml = format!("{}/Cargo.toml", nawa_src);
+    if std::path::Path::new(&nawa_crates_dir).exists() && !std::path::Path::new(&nawa_workspace_toml).exists() {
+        // The crates dir exists but the workspace root doesn't — this means
+        // install.sh didn't copy the workspace Cargo.toml. Create a minimal one.
+        let workspace_toml = r#"[workspace]
+resolver = "2"
+members = []
+
+[workspace.package]
+version = "2.5.2"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["NAWA Project <noreply@nawa.dev>"]
+"#;
+        let _ = std::fs::write(&nawa_workspace_toml, workspace_toml);
+        println!("  ✓ Created workspace root at NAWA source dir");
+    }
 
     // src/main.rs — NAWA server with SvelteKit auto-detect
     println!("🦀 إنشاء src/main.rs (خادم مع Svelte auto-detect)...");
